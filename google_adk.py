@@ -29,13 +29,22 @@ class Agent:
         try:
             # Fallback to a valid 2.5 model if an old one was passed
             model_to_use = "gemini-2.5-flash"
-            response = self.client.models.generate_content(
+            
+            # Prepare configuration
+            config_args = {
+                "system_instruction": self.instructions,
+            }
+            if self.tools:
+                config_args["tools"] = self.tools
+                
+            config = types.GenerateContentConfig(**config_args)
+            
+            # Create a chat session to enable automatic function calling (AFC)
+            chat = self.client.chats.create(
                 model=model_to_use,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.instructions,
-                )
+                config=config
             )
+            response = chat.send_message(prompt)
             return response.text
         except Exception as e:
             print(f"Agent {self.name} encountered an error: {e}")
