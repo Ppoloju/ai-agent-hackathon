@@ -27,8 +27,8 @@ class Agent:
             return "[]"
             
         try:
-            # Fallback to a valid 2.5 model if an old one was passed
-            model_to_use = "gemini-2.5-flash"
+            # Use the specified model
+            model_to_use = self.model if self.model else "gemini-3.5-flash"
             
             # Prepare configuration
             config_args = {

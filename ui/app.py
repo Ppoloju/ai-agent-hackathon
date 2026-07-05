@@ -196,8 +196,18 @@ if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or ge
         with st.chat_message("user"):
             st.markdown(prompt)
     
-    # Construct prompt with context
-    context_block = f"Uploaded Syllabus Content:\n{st.session_state.file_context}\n\n" if st.session_state.file_context else "No syllabus uploaded yet.\n\n"
+    # Construct prompt with context, including the current date/time
+    import datetime
+    now = datetime.datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S")
+    day_str = now.strftime("%A")
+    context_block = f"Current Local Date: {date_str}\nCurrent Local Time: {time_str}\nCurrent Day of the Week: {day_str}\n\n"
+    if st.session_state.file_context:
+        context_block += f"Uploaded Syllabus Content:\n{st.session_state.file_context}\n\n"
+    else:
+        context_block += "No syllabus uploaded yet.\n\n"
+        
     full_prompt = context_block + f"User Request: {prompt}"
     
     # Fetch AI Response
