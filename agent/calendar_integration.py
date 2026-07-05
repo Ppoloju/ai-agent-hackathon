@@ -4,7 +4,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+SCOPES = ['https://www.googleapis.com/auth/calendar']
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOKEN_PATH = os.path.join(PROJECT_ROOT, 'token.json')
 
@@ -81,4 +81,51 @@ def get_calendar_events(start_date: str, end_date: str) -> str:
     except Exception as e:
         return json.dumps({
             "error": f"Failed to retrieve calendar events: {str(e)}"
+        })
+
+def create_calendar_event(summary: str, start_time: str, end_time: str, description: str = "") -> str:
+    """
+    Creates a new calendar event in the user's primary Google Calendar.
+    Use this to add study slots, deadlines, exams, or study plans to their schedule.
+    
+    Args:
+        summary: The title/name of the study session or event.
+        start_time: ISO 8601 format datetime string (e.g. '2026-07-06T10:00:00Z' or '2026-07-06T14:30:00+05:30').
+        end_time: ISO 8601 format datetime string (e.g. '2026-07-06T11:00:00Z' or '2026-07-06T15:30:00+05:30').
+        description: A brief description or syllabus topics to cover during this study session.
+        
+    Returns:
+        A JSON string confirming success and the created event ID/link, or an error message.
+    """
+    creds = load_calendar_credentials()
+    if not creds:
+        return json.dumps({
+            "error": "Google Calendar is not connected. The user must authenticate first via the sidebar in the UI."
+        })
+        
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        event = {
+            'summary': summary,
+            'description': description,
+        }
+        
+        # Handle timezone offsets if present, otherwise default to UTC
+        if '+' in start_time or '-' in start_time[10:]:
+            event['start'] = {'dateTime': start_time}
+            event['end'] = {'dateTime': end_time}
+        else:
+            event['start'] = {'dateTime': start_time, 'timeZone': 'UTC'}
+            event['end'] = {'dateTime': end_time, 'timeZone': 'UTC'}
+            
+        created_event = service.events().insert(calendarId='primary', body=event).execute()
+        return json.dumps({
+            "status": "success",
+            "message": f"Event '{summary}' successfully created.",
+            "event_id": created_event.get("id"),
+            "htmlLink": created_event.get("htmlLink")
+        })
+    except Exception as e:
+        return json.dumps({
+            "error": f"Failed to create calendar event: {str(e)}"
         })

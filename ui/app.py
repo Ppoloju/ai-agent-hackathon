@@ -14,42 +14,57 @@ from agent.agents import study_buddy_agent
 
 st.set_page_config(page_title="AI Study Buddy", layout="wide")
 
+VERIFIER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".oauth_verifier.txt")
+
 # Check for OAuth callback code in query parameters
 if "code" in st.query_params:
     auth_code = st.query_params["code"]
-    # Clear query params to clean up the URL
     st.query_params.clear()
     
-    # Retrieve credentials
     client_id = os.environ.get("GOOGLE_CLIENT_ID")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+    
     if client_id and client_secret:
-        try:
-            client_config = {
-                "web": {
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                }
-            }
-            flow = Flow.from_client_config(
-                client_config,
-                scopes=['https://www.googleapis.com/auth/calendar.readonly'],
-                redirect_uri='http://localhost:8501/'
-            )
-            flow.fetch_token(code=auth_code)
-            creds = flow.credentials
-            
-            # Save credentials to token.json
-            from agent.calendar_integration import TOKEN_PATH
-            with open(TOKEN_PATH, 'w') as token_file:
-                token_file.write(creds.to_json())
+        if os.path.exists(VERIFIER_PATH):
+            try:
+                with open(VERIFIER_PATH, "r") as f:
+                    code_verifier = f.read().strip()
+                os.remove(VERIFIER_PATH)
+            except:
+                code_verifier = None
                 
-            st.success("Successfully connected to Google Calendar! Rerunning...")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error authenticating with Google: {e}")
+            if code_verifier:
+                try:
+                    client_config = {
+                        "web": {
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                            "token_uri": "https://oauth2.googleapis.com/token",
+                        }
+                    }
+                    flow = Flow.from_client_config(
+                        client_config,
+                        scopes=['https://www.googleapis.com/auth/calendar'],
+                        redirect_uri='http://localhost:8501/',
+                        code_verifier=code_verifier
+                    )
+                    flow.fetch_token(code=auth_code)
+                    creds = flow.credentials
+                    
+                    # Save credentials to token.json
+                    from agent.calendar_integration import TOKEN_PATH
+                    with open(TOKEN_PATH, 'w') as token_file:
+                        token_file.write(creds.to_json())
+                        
+                    st.success("Successfully connected to Google Calendar! Rerunning...")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error authenticating with Google: {e}")
+            else:
+                st.error("Authentication verifier failed to load. Please try again.")
+        else:
+            st.error("Authentication session state missing. Please try connecting your calendar again.")
     else:
         st.error("Client ID/Secret missing from environment when handling callback.")
 
@@ -65,24 +80,31 @@ if 'file_context' not in st.session_state:
 # --- SIDEBAR: Upload Context & Google Calendar ---
 with st.sidebar:
     st.header("Upload Context")
-    uploaded_file = st.file_uploader("Upload Syllabus (PDF/TXT)", type=["pdf", "txt"])
+    uploaded_files = st.file_uploader("Upload Syllabi (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True)
     
-    if uploaded_file is not None:
-        if st.button("Process File", use_container_width=True, type="primary"):
+    if uploaded_files:
+        if st.button("Process Files", use_container_width=True, type="primary"):
             with st.spinner("Extracting text..."):
-                text = ""
-                if uploaded_file.name.endswith('.txt'):
-                    text = uploaded_file.getvalue().decode("utf-8")
-                elif uploaded_file.name.endswith('.pdf'):
-                    pdf_reader = PyPDF2.PdfReader(BytesIO(uploaded_file.getvalue()))
-                    for page in pdf_reader.pages:
-                        text += page.extract_text() + "\n"
+                combined_text = ""
+                success_count = 0
+                for uploaded_file in uploaded_files:
+                    text = ""
+                    if uploaded_file.name.endswith('.txt'):
+                        text = uploaded_file.getvalue().decode("utf-8")
+                    elif uploaded_file.name.endswith('.pdf'):
+                        pdf_reader = PyPDF2.PdfReader(BytesIO(uploaded_file.getvalue()))
+                        for page in pdf_reader.pages:
+                            text += page.extract_text() + "\n"
+                    
+                    if text.strip():
+                        combined_text += f"--- CONTENT FROM FILE: {uploaded_file.name} ---\n{text}\n\n"
+                        success_count += 1
                 
-                if text.strip():
-                    st.session_state.file_context = text
-                    st.success("File processed! You can now ask me about it.")
+                if combined_text.strip():
+                    st.session_state.file_context = combined_text
+                    st.success(f"Successfully processed {success_count} file(s)!")
                 else:
-                    st.error("Could not extract text from the file.")
+                    st.error("Could not extract text from the files.")
 
     st.markdown("---")
     st.header("📅 Google Calendar")
@@ -112,7 +134,7 @@ with st.sidebar:
                     "2. Create a project and search for **Google Calendar API** to enable it.\n"
                     "3. Go to the **OAuth consent screen** and select **External**.\n"
                     "   - Set the App name and user support email.\n"
-                    "   - Add the scope: `.../auth/calendar.readonly`.\n"
+                    "   - Add the scope: `.../auth/calendar`.\n"
                     "   - Add your own email as a Test User.\n"
                     "4. Go to **Credentials** -> **Create Credentials** -> **OAuth client ID**.\n"
                     "   - Select Application type: **Web application**.\n"
@@ -125,8 +147,8 @@ with st.sidebar:
                     "6. Restart the server or reload this page."
                 )
         else:
-            # We have config, generate authorization url
             try:
+                import secrets
                 client_config = {
                     "web": {
                         "client_id": client_id,
@@ -135,10 +157,18 @@ with st.sidebar:
                         "token_uri": "https://oauth2.googleapis.com/token",
                     }
                 }
+                
+                # Check if we already have the verifier in session state, otherwise write it
+                if "oauth_verifier" not in st.session_state:
+                    st.session_state.oauth_verifier = secrets.token_urlsafe(64)
+                    with open(VERIFIER_PATH, "w") as f:
+                        f.write(st.session_state.oauth_verifier)
+                
                 flow = Flow.from_client_config(
                     client_config,
-                    scopes=['https://www.googleapis.com/auth/calendar.readonly'],
-                    redirect_uri='http://localhost:8501/'
+                    scopes=['https://www.googleapis.com/auth/calendar'],
+                    redirect_uri='http://localhost:8501/',
+                    code_verifier=st.session_state.oauth_verifier
                 )
                 auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
                 
