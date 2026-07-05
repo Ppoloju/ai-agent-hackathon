@@ -3,14 +3,39 @@ import os
 import sys
 import PyPDF2
 from io import BytesIO
-from dotenv import load_dotenv
-from google_auth_oauthlib.flow import Flow
+import hashlib
+import re
 
-load_dotenv()
+from google_auth_oauthlib.flow import Flow
+from dotenv import load_dotenv
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+ENV_PATH = BASE_DIR / ".env"
+
+# Load .env explicitly
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 # Add parent directory to path so we can import from agent
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent.agents import study_buddy_agent
+
+def clean_markdown_for_tts(text: str) -> str:
+    # Remove markdown headers
+    text = re.sub(r'#+\s+', '', text)
+    # Remove bold/italic markers
+    text = re.sub(r'\*+', '', text)
+    text = re.sub(r'_+', '', text)
+    # Remove link brackets but keep text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Remove bullet points
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+    # Remove numbered list prefixes
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    # Remove backticks and code blocks
+    text = re.sub(r'```[\s\S]*?```', '[Code block omitted]', text)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    return text.strip()
 
 st.set_page_config(page_title="AI Study Buddy", layout="wide")
 
@@ -76,6 +101,12 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'file_context' not in st.session_state:
     st.session_state.file_context = ""
+if 'processed_audio_hashes' not in st.session_state:
+    st.session_state.processed_audio_hashes = set()
+if 'audio_key' not in st.session_state:
+    st.session_state.audio_key = 0
+if 'pending_audio' not in st.session_state:
+    st.session_state.pending_audio = None
 
 # --- SIDEBAR: Upload Context & Google Calendar ---
 with st.sidebar:
@@ -177,6 +208,14 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error preparing authorization: {e}")
 
+    st.markdown("---")
+    st.header("🎙️ Voice Settings")
+    tts_enabled = st.checkbox(
+        "Enable Voice Responses (TTS)", 
+        value=True, 
+        help="When enabled, the AI will generate speech for its responses."
+    )
+
 # --- MAIN CHAT INTERFACE ---
 chat_container = st.container(height=500)
 
@@ -188,6 +227,87 @@ with chat_container:
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if msg.get("audio_bytes"):
+                st.audio(msg["audio_bytes"], format="audio/mp3")
+
+# --- AUDIO & TEXT INPUT PROCESSING ---
+audio_value = st.audio_input("Or speak to your Study Buddy:", key=f"audio_recorder_{st.session_state.audio_key}")
+
+if audio_value is not None:
+    # Read the audio bytes and reset file pointer
+    audio_bytes = audio_value.read()
+    audio_value.seek(0)
+    
+    # Check if this audio has already been processed using a hash
+    audio_hash = hashlib.md5(audio_bytes).hexdigest()
+    if audio_hash not in st.session_state.processed_audio_hashes:
+        st.session_state.processed_audio_hashes.add(audio_hash)
+        
+        # Save audio to pending state for deferred processing
+        st.session_state.pending_audio = {
+            "bytes": audio_bytes,
+            "type": audio_value.type if hasattr(audio_value, 'type') else "audio/wav"
+        }
+        
+        # Increment the key to reset the recorder widget instantly
+        st.session_state.audio_key += 1
+        st.rerun()
+
+# --- PENDING AUDIO PROCESSING (DEFERRED RUN) ---
+if st.session_state.pending_audio is not None:
+    pending = st.session_state.pending_audio
+    st.session_state.pending_audio = None  # Clear immediately to prevent repeat runs
+    
+    # Transcribe audio using the agent
+    with chat_container:
+        with st.chat_message("user"):
+            with st.spinner("Transcribing your voice message..."):
+                transcript = study_buddy_agent.transcribe_audio(pending["bytes"], pending["type"])
+    
+    if transcript == "__RATE_LIMIT__":
+        st.warning("⚠️ Transcription hit a rate limit. Please wait ~30 seconds and try again.")
+    elif transcript == "__TRANSCRIPTION_ERROR__":
+        st.warning("⚠️ Could not transcribe the audio. Please try speaking clearly and try again.")
+    elif transcript.strip():
+        # Append transcribed prompt to history
+        st.session_state.chat_history.append({"role": "user", "content": transcript})
+        
+        # Construct context-aware prompt
+        context_block = f"Uploaded Syllabus Content:\n{st.session_state.file_context}\n\n" if st.session_state.file_context else "No syllabus uploaded yet.\n\n"
+        full_prompt = context_block + f"User Request: {transcript}"
+        
+        # Fetch AI Response
+        with chat_container:
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    response = study_buddy_agent.run(full_prompt)
+                    st.markdown(response)
+                    
+                    # Generate TTS if enabled
+                    tts_bytes = None
+                    if tts_enabled:
+                        try:
+                            from gtts import gTTS
+                            import io
+                            clean_text = clean_markdown_for_tts(response)
+                            if clean_text:
+                                tts = gTTS(text=clean_text, lang='en')
+                                fp = io.BytesIO()
+                                tts.write_to_fp(fp)
+                                fp.seek(0)
+                                tts_bytes = fp.read()
+                                st.audio(tts_bytes, format="audio/mp3")
+                        except Exception as e:
+                            st.error(f"Error generating text-to-speech: {e}")
+        
+        # Save AI response with audio
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": response,
+            "audio_bytes": tts_bytes
+        })
+        st.rerun()
+
 
 if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or generate questions..."):
     # Append user message to UI immediately
@@ -207,5 +327,27 @@ if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or ge
                 response = study_buddy_agent.run(full_prompt)
                 st.markdown(response)
                 
+                # Generate TTS if enabled
+                tts_bytes = None
+                if tts_enabled:
+                    try:
+                        from gtts import gTTS
+                        import io
+                        clean_text = clean_markdown_for_tts(response)
+                        if clean_text:
+                            tts = gTTS(text=clean_text, lang='en')
+                            fp = io.BytesIO()
+                            tts.write_to_fp(fp)
+                            fp.seek(0)
+                            tts_bytes = fp.read()
+                            st.audio(tts_bytes, format="audio/mp3")
+                    except Exception as e:
+                        st.error(f"Error generating text-to-speech: {e}")
+                        
     # Save AI response to history
-    st.session_state.chat_history.append({"role": "assistant", "content": response})
+    st.session_state.chat_history.append({
+        "role": "assistant", 
+        "content": response,
+        "audio_bytes": tts_bytes
+    })
+    st.rerun()
