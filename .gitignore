@@ -22,6 +22,10 @@ Thumbs.db
 # Google Calendar Credentials & OAuth Temp files
 token.json
 ui/.oauth_verifier.txt
+chat_history.json
+
+agent_error.log
+desktop.ini
 
 # VS Code Settings
 .vscode/

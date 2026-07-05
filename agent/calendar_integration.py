@@ -213,3 +213,74 @@ def update_calendar_event(event_id: str, summary: str = None, start_time: str = 
         return json.dumps({
             "error": f"Failed to update calendar event: {str(e)}"
         })
+
+from pydantic import BaseModel, Field
+
+class CalendarEventInput(BaseModel):
+    summary: str = Field(description="The title/name of the study session or event.")
+    start_time: str = Field(description="ISO 8601 format datetime string (e.g. '2026-07-06T10:00:00Z').")
+    end_time: str = Field(description="ISO 8601 format datetime string (e.g. '2026-07-06T12:30:00Z').")
+    description: str = Field(default="", description="A brief description of topics to cover.")
+
+def create_calendar_events(events: list[CalendarEventInput]) -> str:
+    """
+    Creates multiple calendar events in the user's primary Google Calendar in a single call.
+    Use this when you need to schedule multiple study slots, a whole study plan, or several deadlines at once.
+    
+    Args:
+        events: A list of study sessions to schedule.
+            
+    Returns:
+        A JSON string with the status of each event creation.
+    """
+    creds = load_calendar_credentials()
+    if not creds:
+        return json.dumps({
+            "error": "Google Calendar is not connected. The user must authenticate first via the sidebar in the UI."
+        })
+        
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        results = []
+        
+        for item in events:
+            summary = item.summary
+            start_time = item.start_time
+            end_time = item.end_time
+            description = item.description
+            
+            if not start_time or not end_time:
+                results.append({"summary": summary, "status": "failed", "error": "Missing start_time or end_time"})
+                continue
+                
+            event = {
+                'summary': summary,
+                'description': description,
+            }
+            
+            if '+' in start_time or '-' in start_time[10:]:
+                event['start'] = {'dateTime': start_time}
+                event['end'] = {'dateTime': end_time}
+            else:
+                event['start'] = {'dateTime': start_time, 'timeZone': 'UTC'}
+                event['end'] = {'dateTime': end_time, 'timeZone': 'UTC'}
+                
+            try:
+                created_event = service.events().insert(calendarId='primary', body=event).execute()
+                results.append({
+                    "summary": summary,
+                    "status": "success",
+                    "event_id": created_event.get("id")
+                })
+            except Exception as item_err:
+                results.append({
+                    "summary": summary,
+                    "status": "failed",
+                    "error": str(item_err)
+                })
+                
+        return json.dumps({"status": "completed", "results": results})
+    except Exception as e:
+        return json.dumps({
+            "error": f"Failed to batch create calendar events: {str(e)}"
+        })
