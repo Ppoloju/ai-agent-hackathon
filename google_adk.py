@@ -1,4 +1,6 @@
 import os
+import time
+import re
 try:
     from google import genai
     from google.genai import types
@@ -23,6 +25,18 @@ class Agent:
         else:
             self.client = None
 
+    def _extract_retry_delay(self, error_message: str) -> float:
+        """Extract retry delay from error message in seconds."""
+        # Try to match patterns like "Please retry in 27.02510689s" or "retryDelay": "27s"
+        match = re.search(r'Please retry in ([\d.]+)s', error_message)
+        if match:
+            return float(match.group(1))
+        match = re.search(r'"retryDelay":\s*"([\d]+)s"', error_message)
+        if match:
+            return float(match.group(1))
+        # Default to 30 seconds if no delay found
+        return 30.0
+
     def run(self, prompt: str) -> str:
         if not self.client:
             print("Running in MOCK mode (no API key or google-genai library).")
@@ -30,33 +44,61 @@ class Agent:
                 return '[{"topic": "Mock Topic", "hours_needed": 2, "exam_date": "2026-10-15"}]'
             return "[]"
             
-        try:
-            # Use the specified model
-            model_to_use = self.model if self.model else "gemini-3.5-flash"
-            
-            # Prepare configuration
-            config_args = {
-                "system_instruction": self.instructions,
-            }
-            if self.tools:
-                config_args["tools"] = self.tools
-                
-            config = types.GenerateContentConfig(**config_args)
-            
-            # Create a chat session to enable automatic function calling (AFC)
-            chat = self.client.chats.create(
-                model=model_to_use,
-                config=config
-            )
-            response = chat.send_message(prompt)
-            return response.text
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
             try:
-                with open("agent_error.log", "w", encoding="utf-8") as f:
-                    f.write(error_details)
-            except Exception as write_err:
-                print(f"Failed to write log: {write_err}")
-            print(f"Agent {self.name} encountered an error: {e}")
-            return f"Error running agent: {e}"
+                # Use the specified model
+                model_to_use = self.model if self.model else "gemini-3.5-flash"
+                
+                # Prepare configuration
+                config_args = {
+                    "system_instruction": self.instructions,
+                }
+                if self.tools:
+                    config_args["tools"] = self.tools
+                    
+                config = types.GenerateContentConfig(**config_args)
+                
+                # Create a chat session to enable automatic function calling (AFC)
+                chat = self.client.chats.create(
+                    model=model_to_use,
+                    config=config
+                )
+                response = chat.send_message(prompt)
+                return response.text
+            except Exception as e:
+                import traceback
+                error_str = str(e)
+                error_details = traceback.format_exc()
+                
+                # Check if it's a quota/rate limit error (429)
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "quota" in error_str.lower():
+                    retry_delay = self._extract_retry_delay(error_str)
+                    retry_count += 1
+                    
+                    if retry_count < max_retries:
+                        print(f"[RETRY] Quota exceeded. Waiting {retry_delay:.1f}s before retry {retry_count}/{max_retries}...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        print(f"[RETRY] Max retries ({max_retries}) exceeded for quota error.")
+                        try:
+                            with open("agent_error.log", "w", encoding="utf-8") as f:
+                                f.write(error_details)
+                        except Exception as write_err:
+                            print(f"Failed to write log: {write_err}")
+                        print(f"Agent {self.name} encountered quota error after {max_retries} retries: {e}")
+                        return f"Error: API quota exceeded. Please try again later or upgrade your plan. Details: {e}"
+                else:
+                    # Non-quota error, don't retry
+                    try:
+                        with open("agent_error.log", "w", encoding="utf-8") as f:
+                            f.write(error_details)
+                    except Exception as write_err:
+                        print(f"Failed to write log: {write_err}")
+                    print(f"Agent {self.name} encountered an error: {e}")
+                    return f"Error running agent: {e}"
+        
+        return "Error: Max retries exceeded"

@@ -34,7 +34,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
         client = genai.Client(api_key=api_key)
         # Use the correct model for transcription
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             contents=["Please transcribe the following audio. Return only the transcribed text, nothing else.", genai.types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)]
         )
         text = response.text.strip() if response.text else ""
@@ -528,11 +528,12 @@ with chat_container:
                         st.session_state[f"play_{idx}"] = True
                 with col2:
                     if st.button("📋", key=f"copy_{idx}"):
-                        st.session_state[f"copy_{idx}"] = True
+                        escaped_content = msg['content'].replace('`', '\\`').replace('\\', '\\\\').replace('"', '&quot;').replace('\n', '\\n')
+                        st.toast("Copied to clipboard!", icon="✅")
                         components.html(
                             f'''
                             <script>
-                            navigator.clipboard.writeText(`{msg['content'].replace('`', '\\`').replace('\\', '\\\\').replace('"', '&quot;').replace('\n', '\\n')}`);
+                            navigator.clipboard.writeText(`{escaped_content}`);
                             </script>
                             ''',
                             height=0
