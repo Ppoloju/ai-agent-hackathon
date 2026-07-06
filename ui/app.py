@@ -126,9 +126,16 @@ st.markdown("""
 /* Main container max-width for chat-like feel */
 .main .block-container {
     max-width: 900px;
-    padding-top: 2rem;
-    padding-bottom: 5rem;
+    padding-top: 1rem;
+    padding-bottom: 3rem;
 }
+
+/* Sidebar width - 1/3 of page */
+[data-testid="stSidebar"] {
+    width: 33% !important;
+    min-width: 300px;
+}
+
 /* User and Assistant avatars */
 [data-testid="stChatMessageAvatarUser"] {
     background-color: #5436DA !important;
@@ -146,7 +153,7 @@ st.markdown("""
     background: transparent;
     border: none;
     cursor: pointer;
-    font-size: 1.4rem;
+    font-size: 1.6rem;
     padding: 0;
 }
 .icon-btn:hover { opacity: 0.8; }
@@ -164,8 +171,9 @@ st.markdown("""
 /* Sidebar button styling */
 [data-testid="stSidebar"] .stButton > button {
     width: 100%;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
     font-weight: 500;
+    padding: 0.5rem 1rem;
 }
 
 /* Chat list item styling */
@@ -177,31 +185,35 @@ st.markdown("""
 /* Action buttons (delete, rename) */
 [data-testid="stSidebar"] .stButton[key*="del_"] > button,
 [data-testid="stSidebar"] .stButton[key*="rename_"] > button {
-    padding: 0.25rem 0.5rem;
-    font-size: 1rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 1.2rem;
     width: auto;
 }
 
-/* New Chat button */
+/* New Chat button - smaller size */
 .stButton > button[type="primary"] {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border: none;
     color: white;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
 }
 
-/* Clear All Chats button */
-.stButton > button:has-text("Clear All Chats") {
+/* Clear All button - matching UI */
+.stButton > button:has-text("Clear All") {
     background-color: #f87171;
     color: white;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
 }
-.stButton > button:has-text("Clear All Chats"):hover {
+.stButton > button:has-text("Clear All"):hover {
     background-color: #ef4444;
 }
 
 /* Chat message action buttons */
 [data-testid="stChatMessage"] .stButton > button {
-    padding: 0.25rem 0.5rem;
-    font-size: 1.2rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 1.4rem;
     background: transparent;
     border: 1px solid #e5e7eb;
 }
@@ -210,7 +222,7 @@ st.markdown("""
 }
 
 /* Responsive sidebar */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
     [data-testid="stSidebar"] {
         width: 280px !important;
     }
@@ -421,13 +433,30 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("💬 Chats")
     
-    # New Chat button
-    if st.button("➕ New Chat", use_container_width=True, type="primary"):
-        new_id = str(uuid.uuid4())
-        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
-        st.session_state.current_session_id = new_id
-        save_all_sessions(st.session_state.all_sessions)
-        st.rerun()
+    # New Chat and Clear Chat buttons side by side
+    col_new, col_clear = st.columns([1, 1])
+    with col_new:
+        if st.button("➕ New Chat", use_container_width=True, type="primary"):
+            new_id = str(uuid.uuid4())
+            st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+            st.session_state.current_session_id = new_id
+            save_all_sessions(st.session_state.all_sessions)
+            st.rerun()
+    with col_clear:
+        if st.button("🗑️ Clear All", use_container_width=True):
+            st.session_state.all_sessions = {}
+            new_id = str(uuid.uuid4())
+            st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+            st.session_state.current_session_id = new_id
+            db = get_db()
+            if db:
+                try:
+                    db.collection("users").document("default_user").delete()
+                except Exception as e:
+                    st.warning(f"Failed to delete Firestore data: {e}")
+            save_all_sessions(st.session_state.all_sessions)
+            st.success("All chat history cleared!")
+            st.rerun()
 
     # List existing chats with action buttons
     for sid, sdata in list(st.session_state.all_sessions.items()):
@@ -470,25 +499,6 @@ with st.sidebar:
                 if st.button("Cancel", key=f"cancel_rename_{sid}"):
                     st.session_state[f"show_rename_{sid}"] = False
                     st.rerun()
-
-    # Clear all chats button (still normal style)
-    if st.button("Clear All Chats", use_container_width=True, help="Delete all chat history"):
-        # Clear local session state
-        st.session_state.all_sessions = {}
-        new_id = str(uuid.uuid4())
-        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
-        st.session_state.current_session_id = new_id
-        # Delete Firestore data for the user (if connected)
-        db = get_db()
-        if db:
-            try:
-                db.collection("users").document("default_user").delete()
-            except Exception as e:
-                st.warning(f"Failed to delete Firestore data: {e}")
-        # Persist empty sessions locally (and recreate document)
-        save_all_sessions(st.session_state.all_sessions)
-        st.success("All chat history cleared!")
-        st.rerun()
 
     st.markdown("---")
     
