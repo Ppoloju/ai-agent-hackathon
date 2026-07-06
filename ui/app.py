@@ -4,7 +4,6 @@ import sys
 import PyPDF2
 import json
 from io import BytesIO
-import hashlib
 import re
 
 from google_auth_oauthlib.flow import Flow
@@ -63,7 +62,6 @@ def clean_markdown_for_tts(text: str) -> str:
     text = re.sub(r'`([^`]+)`', r'\1', text)
     return text.strip()
 
-HISTORY_PATH = os.path.join(PROJECT_ROOT, "chat_history.json")
 FIREBASE_CREDS_PATH = os.path.join(PROJECT_ROOT, "firebase-credentials.json")
 
 # Initialize Firebase only once
@@ -100,31 +98,16 @@ def load_all_sessions():
                     return {"default": {"title": "Old Chat", "messages": data["chats"]}}
         except Exception as e:
             print(f"Error loading from Firestore: {e}")
-            
-    if os.path.exists(HISTORY_PATH):
-        try:
-            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return {"default": {"title": "Old Chat", "messages": data}}
-                return data
-        except Exception as e:
-            print(f"Error loading chat history: {e}")
     return {}
 
 def save_all_sessions(sessions):
-    sessions_for_json = {}
     sessions_for_db = {}
     
     for sid, sdata in sessions.items():
-        msgs_for_json = []
         msgs_for_db = []
         for msg in sdata.get("messages", []):
-            clean_msg = {k: v for k, v in msg.items() if k != "audio_bytes"}
-            msgs_for_json.append(clean_msg)
             msgs_for_db.append(msg.copy()) # Keep bytes for Firestore if any
             
-        sessions_for_json[sid] = {"title": sdata.get("title", "Chat"), "messages": msgs_for_json}
         sessions_for_db[sid] = {"title": sdata.get("title", "Chat"), "messages": msgs_for_db}
             
     db = get_db()
@@ -132,19 +115,8 @@ def save_all_sessions(sessions):
         try:
             db.collection("users").document("default_user").set({"sessions": sessions_for_db}, merge=True)
         except Exception as e:
-            # Firestore permission errors are common during local development; fallback to local JSON
-            # Firestore permission errors are common during local testing.
-            # Ensure the service‑account JSON (firebase-credentials.json) has the
-            # "Cloud Datastore Owner" (or "Firebase Admin") role and that the
-            # Firestore security rules allow read/write for the project.
-            print(f"Error saving to Firestore (ignored for local dev): {e}")
-            # Continue without raising; data will still be saved locally
-            
-    try:
-        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-            json.dump(sessions_for_json, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving chat history: {e}")
+            print(f"Error saving to Firestore: {e}")
+            st.error(f"Failed to save to Firebase: {e}")
 
 st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="wide", initial_sidebar_state="expanded")
 
@@ -393,14 +365,13 @@ with st.sidebar:
 
     # List existing chats with normal delete button
     for sid, sdata in list(st.session_state.all_sessions.items()):
-        col_main, col_del = st.columns([0.9, 0.1])
+        col_main, col_del, col_rename = st.columns([0.8, 0.1, 0.1])
         with col_main:
             btn_type = "primary" if sid == st.session_state.current_session_id else "secondary"
             if st.button(sdata.get("title", "Chat"), key=f"load_{sid}", use_container_width=True, type=btn_type):
                 st.session_state.current_session_id = sid
                 st.rerun()
         with col_del:
-            # Normal style delete button (no icon)
             # Delete button with trash‑can icon (consistent UI)
             if st.button("🗑️", key=f"del_{sid}", help="Delete this chat"):
                 del st.session_state.all_sessions[sid]
@@ -414,6 +385,25 @@ with st.sidebar:
                         st.session_state.current_session_id = new_id
                 save_all_sessions(st.session_state.all_sessions)
                 st.rerun()
+        with col_rename:
+            if st.button("✏️", key=f"rename_{sid}", help="Rename this chat"):
+                st.session_state[f"rename_{sid}"] = True
+        
+        # Show rename input if rename button was clicked
+        if st.session_state.get(f"rename_{sid}"):
+            new_title = st.text_input("New name", value=sdata.get("title", "Chat"), key=f"rename_input_{sid}")
+            col_save, col_cancel = st.columns([0.5, 0.5])
+            with col_save:
+                if st.button("Save", key=f"save_rename_{sid}"):
+                    if new_title.strip():
+                        st.session_state.all_sessions[sid]["title"] = new_title.strip()
+                        save_all_sessions(st.session_state.all_sessions)
+                    st.session_state[f"rename_{sid}"] = False
+                    st.rerun()
+            with col_cancel:
+                if st.button("Cancel", key=f"cancel_rename_{sid}"):
+                    st.session_state[f"rename_{sid}"] = False
+                    st.rerun()
 
     # Clear all chats button (still normal style)
     if st.button("Clear All Chats", use_container_width=True, help="Delete all chat history"):
@@ -460,12 +450,16 @@ with chat_container:
                     if st.button("🔊", key=f"listen_{idx}"):
                         st.session_state[f"play_{idx}"] = True
                 with col2:
-                    escaped = msg['content'].replace('`', '\\`').replace('\\', '\\\\').replace('"', '&quot;').replace('\n', '\\n')
-                    st.html(
-                        f'''
-                        <button class="icon-btn" onclick="navigator.clipboard.writeText(`{escaped}`)">📋</button>
-                        '''
-                    )
+                    if st.button("📋", key=f"copy_{idx}"):
+                        st.session_state[f"copy_{idx}"] = True
+                        components.html(
+                            f'''
+                            <script>
+                            navigator.clipboard.writeText(`{msg['content'].replace('`', '\\`').replace('\\', '\\\\').replace('"', '&quot;').replace('\n', '\\n')}`);
+                            </script>
+                            ''',
+                            height=0
+                        )
             
             st.markdown(msg["content"])
             
