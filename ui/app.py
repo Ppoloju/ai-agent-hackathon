@@ -10,6 +10,9 @@ import re
 from google_auth_oauthlib.flow import Flow
 from dotenv import load_dotenv
 from pathlib import Path
+import firebase_admin
+from firebase_admin import credentials, firestore
+import streamlit.components.v1 as components
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -30,7 +33,11 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
         if not api_key:
             return "__TRANSCRIPTION_ERROR__"
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # Use the correct model name for the current API version
+        # "gemini-1.5-flash-001" is the available flash model for generate_content
+        # Use a universally available model name. Adjust as needed for your API version.
+        # "gemini-pro" is guaranteed to exist for most accounts.
+        model = genai.GenerativeModel("gemini-pro")
         audio_part = {"mime_type": mime_type, "data": audio_bytes}
         response = model.generate_content(
             ["Please transcribe the following audio. Return only the transcribed text, nothing else.", audio_part]
@@ -41,7 +48,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
         print(f"Transcription error: {e}")
         if "quota" in str(e).lower() or "rate" in str(e).lower():
             return "__RATE_LIMIT__"
-        return "__TRANSCRIPTION_ERROR__"
+        return f"__ERROR__: {str(e)}"
 
 def clean_markdown_for_tts(text: str) -> str:
     # Remove markdown headers
@@ -60,26 +67,120 @@ def clean_markdown_for_tts(text: str) -> str:
     text = re.sub(r'`([^`]+)`', r'\1', text)
     return text.strip()
 
-st.set_page_config(page_title="AI Study Buddy", layout="wide")
 HISTORY_PATH = os.path.join(PROJECT_ROOT, "chat_history.json")
+FIREBASE_CREDS_PATH = os.path.join(PROJECT_ROOT, "firebase-credentials.json")
 
-def load_history():
+# Initialize Firebase only once
+if not firebase_admin._apps:
+    if os.path.exists(FIREBASE_CREDS_PATH):
+        try:
+            cred = credentials.Certificate(FIREBASE_CREDS_PATH)
+            firebase_admin.initialize_app(cred)
+        except Exception as e:
+            print(f"Firebase init error: {e}")
+
+def get_db():
+    if firebase_admin._apps:
+        return firestore.client()
+    return None
+
+def load_all_sessions():
+    db = get_db()
+    if db:
+        try:
+            doc = db.collection("users").document("default_user").get()
+            if doc.exists:
+                data = doc.to_dict()
+                if "sessions" in data:
+                    return data["sessions"]
+                elif "chats" in data: # Migration
+                    return {"default": {"title": "Old Chat", "messages": data["chats"]}}
+        except Exception as e:
+            print(f"Error loading from Firestore: {e}")
+            
     if os.path.exists(HISTORY_PATH):
         try:
             with open(HISTORY_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, list):
+                    return {"default": {"title": "Old Chat", "messages": data}}
+                return data
         except Exception as e:
             print(f"Error loading chat history: {e}")
-    return []
+    return {}
 
-def save_history():
+def save_all_sessions(sessions):
+    sessions_for_json = {}
+    sessions_for_db = {}
+    
+    for sid, sdata in sessions.items():
+        msgs_for_json = []
+        msgs_for_db = []
+        for msg in sdata.get("messages", []):
+            clean_msg = {k: v for k, v in msg.items() if k != "audio_bytes"}
+            msgs_for_json.append(clean_msg)
+            msgs_for_db.append(msg.copy()) # Keep bytes for Firestore if any
+            
+        sessions_for_json[sid] = {"title": sdata.get("title", "Chat"), "messages": msgs_for_json}
+        sessions_for_db[sid] = {"title": sdata.get("title", "Chat"), "messages": msgs_for_db}
+            
+    db = get_db()
+    if db:
+        try:
+            db.collection("users").document("default_user").set({"sessions": sessions_for_db}, merge=True)
+        except Exception as e:
+            # Firestore permission errors are common during local development; fallback to local JSON
+            # Firestore permission errors are common during local testing.
+            # Ensure the service‑account JSON (firebase-credentials.json) has the
+            # "Cloud Datastore Owner" (or "Firebase Admin") role and that the
+            # Firestore security rules allow read/write for the project.
+            print(f"Error saving to Firestore (ignored for local dev): {e}")
+            # Continue without raising; data will still be saved locally
+            
     try:
         with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-            json.dump(st.session_state.chat_history, f, indent=2, ensure_ascii=False)
+            json.dump(sessions_for_json, f, indent=2, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving chat history: {e}")
 
-st.set_page_config(page_title="AI Study Planner",page_icon="LOGO.png",layout="wide")
+st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="centered", initial_sidebar_state="expanded")
+
+# --- CUSTOM CSS FOR CHATGPT STYLE ---
+st.markdown("""
+<style>
+/* Main container max-width for chat-like feel */
+.main .block-container {
+    max-width: 800px;
+    padding-top: 2rem;
+    padding-bottom: 5rem;
+}
+/* Hide Streamlit header and footer */
+header {visibility: hidden;}
+footer {visibility: hidden;}
+
+/* User and Assistant avatars */
+[data-testid="stChatMessageAvatarUser"] {
+    background-color: #5436DA !important;
+}
+[data-testid="stChatMessageAvatarAssistant"] {
+    background-color: #10a37f !important;
+}
+
+/* Make chat input floating at the bottom */
+[data-testid="stChatInput"] {
+    border-radius: 20px;
+}
+/* Icon button styling */
+.icon-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1.4rem;
+    padding: 0;
+}
+.icon-btn:hover { opacity: 0.8; }
+</style>
+""", unsafe_allow_html=True)
 
 VERIFIER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".oauth_verifier.txt")
 
@@ -138,11 +239,32 @@ if "code" in st.query_params:
 st.title("AI Study Planner")
 st.markdown("Upload your syllabus in the sidebar and chat with me to analyze it, build a study plan, or generate practice questions!")
 
+import uuid
+
 # Initialize session state for chat and context
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = load_history()
+if 'all_sessions' not in st.session_state:
+    st.session_state.all_sessions = load_all_sessions()
+if 'current_session_id' not in st.session_state:
+    if st.session_state.all_sessions:
+        st.session_state.current_session_id = list(st.session_state.all_sessions.keys())[-1]
+    else:
+        new_id = str(uuid.uuid4())
+        st.session_state.current_session_id = new_id
+        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+
 if 'file_context' not in st.session_state:
     st.session_state.file_context = ""
+
+def get_current_messages():
+    return st.session_state.all_sessions[st.session_state.current_session_id]["messages"]
+
+def append_to_current_session(msg):
+    msgs = st.session_state.all_sessions[st.session_state.current_session_id]["messages"]
+    if len(msgs) == 0 and msg["role"] == "user":
+        title = msg["content"][:30] + ("..." if len(msg["content"]) > 30 else "")
+        st.session_state.all_sessions[st.session_state.current_session_id]["title"] = title
+    msgs.append(msg)
+    save_all_sessions(st.session_state.all_sessions)
 
 # --- SIDEBAR: Upload Context & Google Calendar ---
 with st.sidebar:
@@ -180,6 +302,8 @@ with st.sidebar:
                 if combined_text.strip():
                     st.session_state.file_context = combined_text
                     st.success(f"Successfully processed {success_count} file(s)!")
+                    st.session_state.auto_trigger = True
+                    st.rerun()
                 else:
                     st.error("Could not extract text from the files.")
 
@@ -256,16 +380,59 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Error preparing authorization: {e}")
                 
+    # Merge Chats and Actions in a single section for a cleaner UI
     st.markdown("---")
-    st.header("⚙️ Actions")
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
-        st.session_state.chat_history = []
-        if os.path.exists(HISTORY_PATH):
+    st.header("💬 Chats & Actions")
+    
+    # New Chat button
+    if st.button("➕ New Chat", use_container_width=True):
+        new_id = str(uuid.uuid4())
+        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+        st.session_state.current_session_id = new_id
+        save_all_sessions(st.session_state.all_sessions)
+        st.rerun()
+
+    # List existing chats with normal delete button
+    for sid, sdata in list(st.session_state.all_sessions.items()):
+        col_main, col_del = st.columns([0.9, 0.1])
+        with col_main:
+            btn_type = "primary" if sid == st.session_state.current_session_id else "secondary"
+            if st.button(sdata.get("title", "Chat"), key=f"load_{sid}", use_container_width=True, type=btn_type):
+                st.session_state.current_session_id = sid
+                st.rerun()
+        with col_del:
+            # Normal style delete button (no icon)
+            # Delete button with trash‑can icon (consistent UI)
+            if st.button("🗑️", key=f"del_{sid}", help="Delete this chat"):
+                del st.session_state.all_sessions[sid]
+                # If the deleted chat was active, switch to another or create new
+                if sid == st.session_state.current_session_id:
+                    if st.session_state.all_sessions:
+                        st.session_state.current_session_id = list(st.session_state.all_sessions.keys())[-1]
+                    else:
+                        new_id = str(uuid.uuid4())
+                        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+                        st.session_state.current_session_id = new_id
+                save_all_sessions(st.session_state.all_sessions)
+                st.rerun()
+
+    # Clear all chats button (still normal style)
+    if st.button("Clear All Chats", use_container_width=True, help="Delete all chat history"):
+        # Clear local session state
+        st.session_state.all_sessions = {}
+        new_id = str(uuid.uuid4())
+        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+        st.session_state.current_session_id = new_id
+        # Delete Firestore data for the user (if connected)
+        db = get_db()
+        if db:
             try:
-                os.remove(HISTORY_PATH)
+                db.collection("users").document("default_user").delete()
             except Exception as e:
-                print(f"Error deleting chat history: {e}")
-        st.success("Chat history cleared!")
+                st.warning(f"Failed to delete Firestore data: {e}")
+        # Persist empty sessions locally (and recreate document)
+        save_all_sessions(st.session_state.all_sessions)
+        st.success("All chat history cleared!")
         st.rerun()
 
     st.markdown("---")
@@ -275,172 +442,82 @@ with st.sidebar:
         value=True, 
         help="When enabled, the AI will generate speech for its responses."
     )
+    
+    pass # End of sidebar
 
 # --- MAIN CHAT INTERFACE ---
-chat_container = st.container(height=500)
+chat_container = st.container()
 
 with chat_container:
-    # Always display initial greeting if empty
-    if not st.session_state.chat_history:
+    current_msgs = get_current_messages()
+    if not current_msgs:
         st.chat_message("assistant").markdown("Hello! I am your AI Study Buddy. Upload a syllabus on the left, then ask me to analyze it, create a study plan, or generate practice questions!")
         
-    for msg in st.session_state.chat_history:
+    for idx, msg in enumerate(current_msgs):
         with st.chat_message(msg["role"]):
+            if msg["role"] == "assistant":
+                col1, col2, col3 = st.columns([0.15, 0.15, 0.7])
+                with col1:
+                    if st.button("🔊", key=f"listen_{idx}"):
+                        st.session_state[f"play_{idx}"] = True
+                with col2:
+                    escaped = msg['content'].replace('`', '\\`').replace('\\', '\\\\').replace('"', '&quot;').replace('\n', '\\n')
+                    components.html(
+                        f'''
+                        <button class="icon-btn" onclick="navigator.clipboard.writeText(`{escaped}`)">📋</button>
+                        ''', height=35
+                    )
+            
             st.markdown(msg["content"])
-            if msg.get("audio_bytes"):
-                st.audio(msg["audio_bytes"], format="audio/mp3")
+            
+            if st.session_state.get(f"play_{idx}") and msg.get("audio_bytes"):
+                st.audio(msg["audio_bytes"], format="audio/mp3", autoplay=True)
+                st.session_state[f"play_{idx}"] = False # Reset after playing
 
 
-# --- FLOATING MIC BUTTON (Web Speech API) ---
+# Use CSS to style the audio input to sit nicely on the right side
 st.markdown("""
 <style>
-#voice-mic-wrap {
-    position: fixed;
-    bottom: 20px;
-    right: 74px;
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 5px;
+div[data-testid="stAudioInput"] {
+    max-width: 300px;
+    margin-left: auto;
+    margin-right: 0px;
 }
-#voice-mic-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: 2px solid rgba(255,255,255,0.15);
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    font-size: 20px;
-    cursor: pointer;
-    box-shadow: 0 4px 16px rgba(102,126,234,0.45);
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    outline: none;
-    padding: 0;
-}
-#voice-mic-btn:hover {
-    transform: scale(1.12);
-    box-shadow: 0 6px 22px rgba(102,126,234,0.65);
-}
-#voice-mic-btn.vmic-listening {
-    background: linear-gradient(135deg, #f5575c 0%, #c0392b 100%);
-    box-shadow: 0 0 0 0 rgba(245,87,92,0.7);
-    animation: vmic-pulse 1.2s ease-out infinite;
-}
-@keyframes vmic-pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(245,87,92,0.7); }
-    70%  { box-shadow: 0 0 0 13px rgba(245,87,92,0); }
-    100% { box-shadow: 0 0 0 0 rgba(245,87,92,0); }
-}
-#voice-mic-toast {
-    background: rgba(30,30,40,0.92);
-    color: #fff;
-    font-size: 11px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    max-width: 180px;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-    backdrop-filter: blur(6px);
-}
-#voice-mic-toast.vmic-show { display: block; }
 </style>
-
-<div id="voice-mic-wrap">
-  <button id="voice-mic-btn" title="Click to speak" onclick="vmicToggle()">🎤</button>
-  <div id="voice-mic-toast"></div>
-</div>
-
-<script>
-(function(){
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null, active = false;
-
-  function toast(msg, keep) {
-    const el = document.getElementById('voice-mic-toast');
-    if (!el) return;
-    el.textContent = msg;
-    el.classList.add('vmic-show');
-    if (!keep) setTimeout(() => el.classList.remove('vmic-show'), 3000);
-  }
-
-  function injectText(text) {
-    const selectors = [
-      '[data-testid="stChatInputTextArea"]',
-      '[data-testid="stChatInput"] textarea',
-      'textarea[aria-label]'
-    ];
-    let input = null;
-    for (const s of selectors) { input = document.querySelector(s); if (input) break; }
-    if (!input) { toast('❌ Could not find chat input'); return; }
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-    setter.call(input, text);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.focus();
-  }
-
-  window.vmicToggle = function() {
-    if (!SR) { alert('Speech recognition not supported. Use Chrome or Edge.'); return; }
-    if (active && rec) { rec.stop(); return; }
-
-    rec = new SR();
-    rec.lang = 'en-US';
-    rec.continuous = false;
-    rec.interimResults = true;
-
-    const btn = document.getElementById('voice-mic-btn');
-
-    rec.onstart = () => {
-      active = true;
-      btn.classList.add('vmic-listening');
-      btn.innerHTML = '&#9209;';
-      toast('🔴 Listening...', true);
-    };
-
-    rec.onresult = (e) => {
-      let interim = '', final = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        (e.results[i].isFinal ? (s => final += s) : (s => interim += s))(e.results[i][0].transcript);
-      }
-      const txt = final || interim;
-      if (txt) {
-        toast(txt.length > 35 ? txt.slice(0, 35) + '…' : txt, !final);
-        injectText(txt);
-      }
-    };
-
-    rec.onerror = (e) => {
-      active = false; btn.classList.remove('vmic-listening'); btn.innerHTML = '🎤';
-      toast('❌ ' + e.error);
-    };
-
-    rec.onend = () => {
-      active = false; btn.classList.remove('vmic-listening'); btn.innerHTML = '🎤';
-      setTimeout(() => document.getElementById('voice-mic-toast').classList.remove('vmic-show'), 2500);
-    };
-
-    rec.start();
-  };
-})();
-</script>
 """, unsafe_allow_html=True)
 
+# Audio input right above chat input
+audio_val = st.audio_input("Record Voice", label_visibility="collapsed")
+audio_prompt = None
+if audio_val:
+    if 'last_audio_hash' not in st.session_state or st.session_state.last_audio_hash != hash(audio_val.getvalue()):
+        st.session_state.last_audio_hash = hash(audio_val.getvalue())
+        with st.spinner("Transcribing audio..."):
+            transcribed_text = transcribe_audio(audio_val.getvalue(), audio_val.type)
+            if not transcribed_text.startswith("__ERROR__") and transcribed_text not in ["__TRANSCRIPTION_ERROR__", "__RATE_LIMIT__"]:
+                audio_prompt = transcribed_text
+            else:
+                st.error(f"Failed to transcribe audio. Reason: {transcribed_text}")
 
-if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or generate questions..."):
+# Combine chat input and audio prompt
+chat_input = st.chat_input("Ask me to create a plan, analyze the syllabus, or generate questions...")
+
+if st.session_state.get("auto_trigger", False):
+    final_prompt = "I just uploaded my syllabus. Please extract the key topics, deadlines, and exam dates from it and provide a brief overview."
+    st.session_state.auto_trigger = False
+else:
+    final_prompt = chat_input or audio_prompt
+
+if final_prompt:
+    # Clear audio state if user submitted via chat to avoid loop
+    if chat_input and 'last_audio_hash' in st.session_state:
+        st.session_state.last_audio_hash = None
+
     # Append user message to UI immediately
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
-    save_history()
+    append_to_current_session({"role": "user", "content": final_prompt})
     with chat_container:
         with st.chat_message("user"):
-            st.markdown(prompt)
+            st.markdown(final_prompt)
     
     # Construct prompt with context, including the current date/time
     import datetime
@@ -454,7 +531,7 @@ if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or ge
     else:
         context_block += "No syllabus uploaded yet.\n\n"
         
-    full_prompt = context_block + f"User Request: {prompt}"
+    full_prompt = context_block + f"User Request: {final_prompt}"
     
     # Fetch AI Response
     with chat_container:
@@ -476,16 +553,14 @@ if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or ge
                             tts.write_to_fp(fp)
                             fp.seek(0)
                             tts_bytes = fp.read()
-                            st.audio(tts_bytes, format="audio/mp3")
+                            st.audio(tts_bytes, format="audio/mp3", autoplay=True)
                     except Exception as e:
                         st.error(f"Error generating text-to-speech: {e}")
                         
-    # Save AI response to history
-    st.session_state.chat_history.append({
+    # Save AI response to history and rerun
+    append_to_current_session({
         "role": "assistant", 
         "content": response,
         "audio_bytes": tts_bytes
     })
     st.rerun()
-    st.session_state.chat_history.append({"role": "assistant", "content": response})
-    save_history()

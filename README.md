@@ -33,6 +33,7 @@ Students often struggle to manually extract critical deadlines and topics from d
 | **AI Agent** | `agent/agents.py` | Configures the `StudyBuddyAgent` with tools and Gemini model |
 | **Gemini Wrapper** | `google_adk.py` | Lightweight wrapper around `google-genai` for chat + function calling |
 | **Calendar Tools** | `agent/calendar_integration.py` | CRUD functions for Google Calendar via OAuth |
+| **Database** | `Firebase Firestore` | Cloud database for persistent chat history |
 | **MCP Server** | `mcp_server/server.py` | Standalone Model Context Protocol server (Phase 2 / optional) |
 
 ---
@@ -93,6 +94,7 @@ The `requirements.txt` installs the following packages:
 | `mcp` | Model Context Protocol server support |
 | `gtts` | Google Text-to-Speech for voice responses |
 | `pydantic` | Data validation for batch calendar event creation |
+| `firebase-admin` | Connects to Firebase Firestore for cloud chat storage |
 
 > **⚠️ Note:** Do NOT install `google-generativeai` — this project uses `google-genai` (the newer unified client). Installing the wrong package will cause an `ImportError`.
 
@@ -140,6 +142,17 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret_here
    - Application type: **Web application**
    - Add Authorized Redirect URI: `http://localhost:8501/`
 6. Copy the **Client ID** and **Client Secret** into your `.env`
+
+#### 4c. Setup Firebase Firestore (Required for Chat History)
+
+1. Go to the [Firebase Console](https://console.firebase.google.com/) and click **Add project**.
+2. Name your project (e.g., "StudyPlanner-AI") and click Continue.
+3. In the left sidebar, go to **Build → Firestore Database**.
+4. Click **Create database**. Select **Start in Test Mode** and choose a location.
+5. Click the **Gear Icon ⚙️ (Project settings)** in the top left corner.
+6. Go to the **Service accounts** tab and click **Generate new private key**.
+7. A `.json` file will download to your computer.
+8. **CRITICAL:** Move this file into the root of this cloned repository (`ai-agent-hackathon/`) and rename it exactly to `firebase-credentials.json`.
 
 ---
 
@@ -205,5 +218,5 @@ ai-agent-hackathon/
 - 📅 **Study Plan Generation** — AI checks your Google Calendar for busy slots and builds a conflict-free plan
 - 🗓️ **Calendar Integration** — Automatically schedules, updates, or deletes study sessions in Google Calendar
 - ❓ **Practice Quizzes** — Generates custom quiz questions based on your syllabus topics
-- 🎙️ **Voice Input + TTS** — Speak to your Study Buddy and hear responses read aloud
-- 💬 **Persistent Chat History** — Conversations are saved locally to `chat_history.json`
+- 🎙️ **Integrated Voice & UI** — Chat or speak using our seamless ChatGPT-like interface. Includes instant Copy 📋 and Listen 🔊 action buttons!
+- ☁️ **Cloud Chat History** — All conversations are securely backed up to Firebase Firestore in real-time.
