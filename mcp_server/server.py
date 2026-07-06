@@ -134,5 +134,8 @@ def health_check() -> str:
 # Entry point
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    log.info(f"Starting StudyPlannerMCP server on {HOST}:{PORT}")
-    mcp.run()
+    if TRANSPORT == "stdio":
+        log.info("Starting StudyPlannerMCP server over stdio (host/port unused)")
+    else:
+        log.info(f"Starting StudyPlannerMCP server on {HOST}:{PORT} via {TRANSPORT}")
+    mcp.run(transport=TRANSPORT)
