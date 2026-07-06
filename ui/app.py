@@ -125,7 +125,7 @@ st.markdown("""
 <style>
 /* Main container max-width for chat-like feel */
 .main .block-container {
-    max-width: 800px;
+    max-width: 900px;
     padding-top: 2rem;
     padding-bottom: 5rem;
 }
@@ -150,6 +150,71 @@ st.markdown("""
     padding: 0;
 }
 .icon-btn:hover { opacity: 0.8; }
+
+/* Button styling improvements */
+.stButton > button {
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+/* Sidebar button styling */
+[data-testid="stSidebar"] .stButton > button {
+    width: 100%;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+/* Chat list item styling */
+[data-testid="stSidebar"] .stButton[key*="load_"] {
+    text-align: left;
+    justify-content: flex-start;
+}
+
+/* Action buttons (delete, rename) */
+[data-testid="stSidebar"] .stButton[key*="del_"] > button,
+[data-testid="stSidebar"] .stButton[key*="rename_"] > button {
+    padding: 0.25rem 0.5rem;
+    font-size: 1rem;
+    width: auto;
+}
+
+/* New Chat button */
+.stButton > button[type="primary"] {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+}
+
+/* Clear All Chats button */
+.stButton > button:has-text("Clear All Chats") {
+    background-color: #f87171;
+    color: white;
+}
+.stButton > button:has-text("Clear All Chats"):hover {
+    background-color: #ef4444;
+}
+
+/* Chat message action buttons */
+[data-testid="stChatMessage"] .stButton > button {
+    padding: 0.25rem 0.5rem;
+    font-size: 1.2rem;
+    background: transparent;
+    border: 1px solid #e5e7eb;
+}
+[data-testid="stChatMessage"] .stButton > button:hover {
+    background: #f3f4f6;
+}
+
+/* Responsive sidebar */
+@media (max-width: 768px) {
+    [data-testid="stSidebar"] {
+        width: 280px !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -241,153 +306,154 @@ def append_to_current_session(msg):
 with st.sidebar:
     col_img, col_title = st.columns([1, 3])
     with col_img:
-        st.image("LOGO.png", width=55)
+        st.image("LOGO.png", width=60)
     with col_title:
         st.markdown(
-            "<h2 style='margin:0; padding-top:8px; line-height:1.2;'>AI Study Planner</h2>",
+            "<h2 style='margin:0; padding-top:8px; line-height:1.2; color: #5436DA;'>AI Study Planner</h2>",
             unsafe_allow_html=True
         )
-    st.markdown("---")
-    st.header("Upload Context")
-    uploaded_files = st.file_uploader("Upload Syllabus (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True)
-
     
-    if uploaded_files:
-        if st.button("Process Files", use_container_width=True, type="primary"):
-            with st.spinner("Extracting text..."):
-                combined_text = ""
-                success_count = 0
-                for uploaded_file in uploaded_files:
-                    text = ""
-                    if uploaded_file.name.endswith('.txt'):
-                        text = uploaded_file.getvalue().decode("utf-8")
-                    elif uploaded_file.name.endswith('.pdf'):
-                        pdf_reader = PyPDF2.PdfReader(BytesIO(uploaded_file.getvalue()))
-                        for page in pdf_reader.pages:
-                            text += page.extract_text() + "\n"
+    st.markdown("---")
+    
+    with st.expander("📁 Upload Context", expanded=False):
+        uploaded_files = st.file_uploader("Upload Syllabus (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True, label_visibility="collapsed")
+        
+        if uploaded_files:
+            if st.button("Process Files", use_container_width=True, type="primary"):
+                with st.spinner("Extracting text..."):
+                    combined_text = ""
+                    success_count = 0
+                    for uploaded_file in uploaded_files:
+                        text = ""
+                        if uploaded_file.name.endswith('.txt'):
+                            text = uploaded_file.getvalue().decode("utf-8")
+                        elif uploaded_file.name.endswith('.pdf'):
+                            pdf_reader = PyPDF2.PdfReader(BytesIO(uploaded_file.getvalue()))
+                            for page in pdf_reader.pages:
+                                text += page.extract_text() + "\n"
+                        
+                        if text.strip():
+                            combined_text += f"--- CONTENT FROM FILE: {uploaded_file.name} ---\n{text}\n\n"
+                            success_count += 1
                     
-                    if text.strip():
-                        combined_text += f"--- CONTENT FROM FILE: {uploaded_file.name} ---\n{text}\n\n"
-                        success_count += 1
-                
-                if combined_text.strip():
-                    st.session_state.file_context = combined_text
-                    st.success(f"Successfully processed {success_count} file(s)!")
-                    st.session_state.auto_trigger = True
-                    st.rerun()
-                else:
-                    st.error("Could not extract text from the files.")
+                    if combined_text.strip():
+                        st.session_state.file_context = combined_text
+                        st.success(f"Successfully processed {success_count} file(s)!")
+                        st.session_state.auto_trigger = True
+                        st.rerun()
+                    else:
+                        st.error("Could not extract text from the files.")
 
     st.markdown("---")
-    st.header("📅 Google Calendar")
     
-    # Check calendar connection status
-    from agent.calendar_integration import TOKEN_PATH, load_calendar_credentials
-    creds = load_calendar_credentials()
-    
-    if creds:
-        st.success("Connected to Google Calendar")
-        if st.button("Disconnect Calendar", use_container_width=True):
-            if os.path.exists(TOKEN_PATH):
-                os.remove(TOKEN_PATH)
-            st.success("Disconnected! Rerunning...")
-            st.rerun()
-    else:
-        st.info("Google Calendar is not connected.")
+    with st.expander("📅 Google Calendar", expanded=False):
+        # Check calendar connection status
+        from agent.calendar_integration import TOKEN_PATH, load_calendar_credentials
+        creds = load_calendar_credentials()
         
-        client_id = os.environ.get("GOOGLE_CLIENT_ID")
-        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
-        
-        if not client_id or not client_secret:
-            st.warning("Client ID/Secret not found in .env file.")
-            with st.expander("Setup Guide"):
-                st.markdown(
-                    "1. Go to the [Google Cloud Console](https://console.cloud.google.com/).\n"
-                    "2. Create a project and search for **Google Calendar API** to enable it.\n"
-                    "3. Go to the **OAuth consent screen** and select **External**.\n"
-                    "   - Set the App name and user support email.\n"
-                    "   - Add the scope: `.../auth/calendar`.\n"
-                    "   - Add your own email as a Test User.\n"
-                    "4. Go to **Credentials** -> **Create Credentials** -> **OAuth client ID**.\n"
-                    "   - Select Application type: **Web application**.\n"
-                    "   - Add Authorized Redirect URI: `http://localhost:8501/`.\n"
-                    "5. Copy the Client ID and Client Secret into your `.env` file:\n"
-                    "```env\n"
-                    "GOOGLE_CLIENT_ID=your_id\n"
-                    "GOOGLE_CLIENT_SECRET=your_secret\n"
-                    "```\n"
-                    "6. Restart the server or reload this page."
-                )
+        if creds:
+            st.success("Connected to Google Calendar")
+            if st.button("Disconnect Calendar", use_container_width=True):
+                if os.path.exists(TOKEN_PATH):
+                    os.remove(TOKEN_PATH)
+                st.success("Disconnected! Rerunning...")
+                st.rerun()
         else:
-            try:
-                import secrets
-                client_config = {
-                    "web": {
-                        "client_id": client_id,
-                        "client_secret": client_secret,
-                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                        "token_uri": "https://oauth2.googleapis.com/token",
+            st.info("Google Calendar is not connected.")
+            
+            client_id = os.environ.get("GOOGLE_CLIENT_ID")
+            client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+            
+            if not client_id or not client_secret:
+                st.warning("Client ID/Secret not found in .env file.")
+                with st.expander("Setup Guide"):
+                    st.markdown(
+                        "1. Go to the [Google Cloud Console](https://console.cloud.google.com/).\n"
+                        "2. Create a project and search for **Google Calendar API** to enable it.\n"
+                        "3. Go to the **OAuth consent screen** and select **External**.\n"
+                        "   - Set the App name and user support email.\n"
+                        "   - Add the scope: `.../auth/calendar`.\n"
+                        "   - Add your own email as a Test User.\n"
+                        "4. Go to **Credentials** -> **Create Credentials** -> **OAuth client ID**.\n"
+                        "   - Select Application type: **Web application**.\n"
+                        "   - Add Authorized Redirect URI: `http://localhost:8501/`.\n"
+                        "5. Copy the Client ID and Client Secret into your `.env` file:\n"
+                        "```env\n"
+                        "GOOGLE_CLIENT_ID=your_id\n"
+                        "GOOGLE_CLIENT_SECRET=your_secret\n"
+                        "```\n"
+                        "6. Restart the server or reload this page."
+                    )
+            else:
+                try:
+                    import secrets
+                    client_config = {
+                        "web": {
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                            "token_uri": "https://oauth2.googleapis.com/token",
+                        }
                     }
-                }
-                
-                # Check if we already have the verifier in session state, otherwise write it
-                if "oauth_verifier" not in st.session_state:
-                    st.session_state.oauth_verifier = secrets.token_urlsafe(64)
-                    with open(VERIFIER_PATH, "w") as f:
-                        f.write(st.session_state.oauth_verifier)
-                
-                flow = Flow.from_client_config(
-                    client_config,
-                    scopes=['https://www.googleapis.com/auth/calendar'],
-                    redirect_uri='http://localhost:8501/',
-                    code_verifier=st.session_state.oauth_verifier
-                )
-                auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
-                
-                st.markdown("""<style>.stLinkButton > a {background-color: #E85D5A !important;color: white !important;border: none !important;width: 100%;text-align: center;border-radius: 0.5rem;padding: 0.5rem 1rem;font-weight: 500;}.stLinkButton > a:hover {background-color: #d94f4c !important;color: white !important;}</style>""", unsafe_allow_html=True)
+                    
+                    # Check if we already have the verifier in session state, otherwise write it
+                    if "oauth_verifier" not in st.session_state:
+                        st.session_state.oauth_verifier = secrets.token_urlsafe(64)
+                        with open(VERIFIER_PATH, "w") as f:
+                            f.write(st.session_state.oauth_verifier)
+                    
+                    flow = Flow.from_client_config(
+                        client_config,
+                        scopes=['https://www.googleapis.com/auth/calendar'],
+                        redirect_uri='http://localhost:8501/',
+                        code_verifier=st.session_state.oauth_verifier
+                    )
+                    auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+                    
+                    st.markdown("""<style>.stLinkButton > a {background-color: #E85D5A !important;color: white !important;border: none !important;width: 100%;text-align: center;border-radius: 0.5rem;padding: 0.5rem 1rem;font-weight: 500;}.stLinkButton > a:hover {background-color: #d94f4c !important;color: white !important;}</style>""", unsafe_allow_html=True)
 
-                st.link_button("🔗 Connect Google Calendar", auth_url,use_container_width=True)
-                st.caption("You will be redirected back here after authorizing.")
-            except Exception as e:
-                st.error(f"Error preparing authorization: {e}")
+                    st.link_button("🔗 Connect Google Calendar", auth_url,use_container_width=True)
+                    st.caption("You will be redirected back here after authorizing.")
+                except Exception as e:
+                    st.error(f"Error preparing authorization: {e}")
                 
     # Merge Chats and Actions in a single section for a cleaner UI
     st.markdown("---")
-    st.header("💬 Chats & Actions")
+    st.subheader("💬 Chats")
     
     # New Chat button
-    if st.button("➕ New Chat", use_container_width=True):
+    if st.button("➕ New Chat", use_container_width=True, type="primary"):
         new_id = str(uuid.uuid4())
         st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
         st.session_state.current_session_id = new_id
         save_all_sessions(st.session_state.all_sessions)
         st.rerun()
 
-    # List existing chats with normal delete button
+    # List existing chats with action buttons
     for sid, sdata in list(st.session_state.all_sessions.items()):
-        col_main, col_del, col_rename = st.columns([0.8, 0.1, 0.1])
+        col_main, col_actions = st.columns([0.75, 0.25])
         with col_main:
             btn_type = "primary" if sid == st.session_state.current_session_id else "secondary"
             if st.button(sdata.get("title", "Chat"), key=f"load_{sid}", use_container_width=True, type=btn_type):
                 st.session_state.current_session_id = sid
                 st.rerun()
-        with col_del:
-            # Delete button with trash‑can icon (consistent UI)
-            if st.button("🗑️", key=f"del_{sid}", help="Delete this chat"):
-                del st.session_state.all_sessions[sid]
-                # If the deleted chat was active, switch to another or create new
-                if sid == st.session_state.current_session_id:
-                    if st.session_state.all_sessions:
-                        st.session_state.current_session_id = list(st.session_state.all_sessions.keys())[-1]
-                    else:
-                        new_id = str(uuid.uuid4())
-                        st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
-                        st.session_state.current_session_id = new_id
-                save_all_sessions(st.session_state.all_sessions)
-                st.rerun()
-        with col_rename:
-            if st.button("✏️", key=f"rename_{sid}", help="Rename this chat"):
-                st.session_state[f"show_rename_{sid}"] = True
+        with col_actions:
+            col_del, col_rename = st.columns([1, 1])
+            with col_del:
+                if st.button("🗑️", key=f"del_{sid}", help="Delete this chat"):
+                    del st.session_state.all_sessions[sid]
+                    if sid == st.session_state.current_session_id:
+                        if st.session_state.all_sessions:
+                            st.session_state.current_session_id = list(st.session_state.all_sessions.keys())[-1]
+                        else:
+                            new_id = str(uuid.uuid4())
+                            st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
+                            st.session_state.current_session_id = new_id
+                    save_all_sessions(st.session_state.all_sessions)
+                    st.rerun()
+            with col_rename:
+                if st.button("✏️", key=f"rename_{sid}", help="Rename this chat"):
+                    st.session_state[f"show_rename_{sid}"] = True
         
         # Show rename input if rename button was clicked
         if st.session_state.get(f"show_rename_{sid}"):
@@ -425,12 +491,13 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-    st.header("🎙️ Voice Settings")
-    tts_enabled = st.checkbox(
-        "Enable Voice Responses (TTS)", 
-        value=True, 
-        help="When enabled, the AI will generate speech for its responses."
-    )
+    
+    with st.expander("🎙️ Voice Settings", expanded=False):
+        tts_enabled = st.checkbox(
+            "Enable Voice Responses (TTS)", 
+            value=True, 
+            help="When enabled, the AI will generate speech for its responses."
+        )
     
     pass # End of sidebar
 
