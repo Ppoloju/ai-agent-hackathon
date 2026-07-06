@@ -387,10 +387,10 @@ with st.sidebar:
                 st.rerun()
         with col_rename:
             if st.button("✏️", key=f"rename_{sid}", help="Rename this chat"):
-                st.session_state[f"rename_{sid}"] = True
+                st.session_state[f"show_rename_{sid}"] = True
         
         # Show rename input if rename button was clicked
-        if st.session_state.get(f"rename_{sid}"):
+        if st.session_state.get(f"show_rename_{sid}"):
             new_title = st.text_input("New name", value=sdata.get("title", "Chat"), key=f"rename_input_{sid}")
             col_save, col_cancel = st.columns([0.5, 0.5])
             with col_save:
@@ -398,11 +398,11 @@ with st.sidebar:
                     if new_title.strip():
                         st.session_state.all_sessions[sid]["title"] = new_title.strip()
                         save_all_sessions(st.session_state.all_sessions)
-                    st.session_state[f"rename_{sid}"] = False
+                    st.session_state[f"show_rename_{sid}"] = False
                     st.rerun()
             with col_cancel:
                 if st.button("Cancel", key=f"cancel_rename_{sid}"):
-                    st.session_state[f"rename_{sid}"] = False
+                    st.session_state[f"show_rename_{sid}"] = False
                     st.rerun()
 
     # Clear all chats button (still normal style)
