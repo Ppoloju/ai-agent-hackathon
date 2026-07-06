@@ -436,14 +436,14 @@ with st.sidebar:
     # New Chat and Clear Chat buttons side by side
     col_new, col_clear = st.columns([1, 1])
     with col_new:
-        if st.button("➕ New Chat", use_container_width=True, type="primary"):
+        if st.button("New Chat", use_container_width=True, type="primary"):
             new_id = str(uuid.uuid4())
             st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
             st.session_state.current_session_id = new_id
             save_all_sessions(st.session_state.all_sessions)
             st.rerun()
     with col_clear:
-        if st.button("🗑️ Clear All", use_container_width=True):
+        if st.button("Clear All", use_container_width=True):
             st.session_state.all_sessions = {}
             new_id = str(uuid.uuid4())
             st.session_state.all_sessions[new_id] = {"title": "New Chat", "messages": []}
