@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import sys
 import PyPDF2
+import json
 from io import BytesIO
 import hashlib
 import re
@@ -17,7 +18,8 @@ ENV_PATH = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 # Add parent directory to path so we can import from agent
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJECT_ROOT)
 from agent.agents import study_buddy_agent
 
 def clean_markdown_for_tts(text: str) -> str:
@@ -38,6 +40,25 @@ def clean_markdown_for_tts(text: str) -> str:
     return text.strip()
 
 st.set_page_config(page_title="AI Study Buddy", layout="wide")
+HISTORY_PATH = os.path.join(PROJECT_ROOT, "chat_history.json")
+
+def load_history():
+    if os.path.exists(HISTORY_PATH):
+        try:
+            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading chat history: {e}")
+    return []
+
+def save_history():
+    try:
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(st.session_state.chat_history, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving chat history: {e}")
+
+st.set_page_config(page_title="AI Study Planner",page_icon="LOGO.png",layout="wide")
 
 VERIFIER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".oauth_verifier.txt")
 
@@ -93,12 +114,12 @@ if "code" in st.query_params:
     else:
         st.error("Client ID/Secret missing from environment when handling callback.")
 
-st.title("AI Study Buddy")
+st.title("AI Study Planner")
 st.markdown("Upload your syllabus in the sidebar and chat with me to analyze it, build a study plan, or generate practice questions!")
 
 # Initialize session state for chat and context
 if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = load_history()
 if 'file_context' not in st.session_state:
     st.session_state.file_context = ""
 if 'processed_audio_hashes' not in st.session_state:
@@ -110,8 +131,10 @@ if 'pending_audio' not in st.session_state:
 
 # --- SIDEBAR: Upload Context & Google Calendar ---
 with st.sidebar:
+    st.image("LOGO.png", width=50)
     st.header("Upload Context")
     uploaded_files = st.file_uploader("Upload Syllabi (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True)
+
     
     if uploaded_files:
         if st.button("Process Files", use_container_width=True, type="primary"):
@@ -203,10 +226,24 @@ with st.sidebar:
                 )
                 auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
                 
-                st.markdown(f"[👉 Click here to authorize access]({auth_url})")
+                st.markdown("""<style>.stLinkButton > a {background-color: #E85D5A !important;color: white !important;border: none !important;width: 100%;text-align: center;border-radius: 0.5rem;padding: 0.5rem 1rem;font-weight: 500;}.stLinkButton > a:hover {background-color: #d94f4c !important;color: white !important;}</style>""", unsafe_allow_html=True)
+
+                st.link_button("🔗 Connect Google Calendar", auth_url,use_container_width=True)
                 st.caption("You will be redirected back here after authorizing.")
             except Exception as e:
                 st.error(f"Error preparing authorization: {e}")
+                
+    st.markdown("---")
+    st.header("⚙️ Actions")
+    if st.button("🗑️ Clear Chat History", use_container_width=True):
+        st.session_state.chat_history = []
+        if os.path.exists(HISTORY_PATH):
+            try:
+                os.remove(HISTORY_PATH)
+            except Exception as e:
+                print(f"Error deleting chat history: {e}")
+        st.success("Chat history cleared!")
+        st.rerun()
 
     st.markdown("---")
     st.header("🎙️ Voice Settings")
@@ -312,12 +349,23 @@ if st.session_state.pending_audio is not None:
 if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or generate questions..."):
     # Append user message to UI immediately
     st.session_state.chat_history.append({"role": "user", "content": prompt})
+    save_history()
     with chat_container:
         with st.chat_message("user"):
             st.markdown(prompt)
     
-    # Construct prompt with context
-    context_block = f"Uploaded Syllabus Content:\n{st.session_state.file_context}\n\n" if st.session_state.file_context else "No syllabus uploaded yet.\n\n"
+    # Construct prompt with context, including the current date/time
+    import datetime
+    now = datetime.datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S")
+    day_str = now.strftime("%A")
+    context_block = f"Current Local Date: {date_str}\nCurrent Local Time: {time_str}\nCurrent Day of the Week: {day_str}\n\n"
+    if st.session_state.file_context:
+        context_block += f"Uploaded Syllabus Content:\n{st.session_state.file_context}\n\n"
+    else:
+        context_block += "No syllabus uploaded yet.\n\n"
+        
     full_prompt = context_block + f"User Request: {prompt}"
     
     # Fetch AI Response
@@ -351,3 +399,5 @@ if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or ge
         "audio_bytes": tts_bytes
     })
     st.rerun()
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
+    save_history()

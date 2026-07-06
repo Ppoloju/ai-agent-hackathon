@@ -1,0 +1,7 @@
+streamlit
+python-dotenv
+PyPDF2
+google-genai
+google-auth-oauthlib
+google-api-python-client
+mcp

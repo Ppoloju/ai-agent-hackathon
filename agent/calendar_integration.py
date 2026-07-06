@@ -71,6 +71,7 @@ def get_calendar_events(start_date: str, end_date: str) -> str:
             start = event['start'].get('dateTime', event['start'].get('date'))
             end = event['end'].get('dateTime', event['end'].get('date'))
             formatted_events.append({
+                "id": event.get("id"),
                 "summary": event.get("summary", "No Title"),
                 "start": start,
                 "end": end,
@@ -128,4 +129,158 @@ def create_calendar_event(summary: str, start_time: str, end_time: str, descript
     except Exception as e:
         return json.dumps({
             "error": f"Failed to create calendar event: {str(e)}"
+        })
+
+def delete_calendar_event(event_id: str) -> str:
+    """
+    Deletes an event from the user's primary Google Calendar.
+    Use this when the user requests to cancel, delete, or remove a study slot, exam, or other scheduled event.
+    
+    Args:
+        event_id: The unique ID of the event to delete.
+        
+    Returns:
+        A JSON string confirming success or an error message.
+    """
+    creds = load_calendar_credentials()
+    if not creds:
+        return json.dumps({
+            "error": "Google Calendar is not connected. The user must authenticate first via the sidebar in the UI."
+        })
+        
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        service.events().delete(calendarId='primary', eventId=event_id).execute()
+        return json.dumps({
+            "status": "success",
+            "message": f"Event '{event_id}' successfully deleted."
+        })
+    except Exception as e:
+        return json.dumps({
+            "error": f"Failed to delete calendar event: {str(e)}"
+        })
+
+def update_calendar_event(event_id: str, summary: str = None, start_time: str = None, end_time: str = None, description: str = None) -> str:
+    """
+    Updates/modifies details of an existing event in the user's primary Google Calendar.
+    Use this to reschedule, rename, or update the description of a study session, exam, or schedule slot.
+    
+    Args:
+        event_id: The unique ID of the event to update.
+        summary: Optional new title/name of the event.
+        start_time: Optional new ISO 8601 format start datetime string.
+        end_time: Optional new ISO 8601 format end datetime string.
+        description: Optional new description.
+        
+    Returns:
+        A JSON string confirming success and updated event details, or an error message.
+    """
+    creds = load_calendar_credentials()
+    if not creds:
+        return json.dumps({
+            "error": "Google Calendar is not connected. The user must authenticate first via the sidebar in the UI."
+        })
+        
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        # Fetch existing event details first
+        event = service.events().get(calendarId='primary', eventId=event_id).execute()
+        
+        if summary is not None:
+            event['summary'] = summary
+        if description is not None:
+            event['description'] = description
+            
+        if start_time is not None:
+            if '+' in start_time or '-' in start_time[10:]:
+                event['start'] = {'dateTime': start_time}
+            else:
+                event['start'] = {'dateTime': start_time, 'timeZone': 'UTC'}
+                
+        if end_time is not None:
+            if '+' in end_time or '-' in end_time[10:]:
+                event['end'] = {'dateTime': end_time}
+            else:
+                event['end'] = {'dateTime': end_time, 'timeZone': 'UTC'}
+                
+        updated_event = service.events().update(calendarId='primary', eventId=event_id, body=event).execute()
+        return json.dumps({
+            "status": "success",
+            "message": f"Event '{event_id}' successfully updated.",
+            "htmlLink": updated_event.get("htmlLink")
+        })
+    except Exception as e:
+        return json.dumps({
+            "error": f"Failed to update calendar event: {str(e)}"
+        })
+
+from pydantic import BaseModel, Field
+
+class CalendarEventInput(BaseModel):
+    summary: str = Field(description="The title/name of the study session or event.")
+    start_time: str = Field(description="ISO 8601 format datetime string (e.g. '2026-07-06T10:00:00Z').")
+    end_time: str = Field(description="ISO 8601 format datetime string (e.g. '2026-07-06T12:30:00Z').")
+    description: str = Field(default="", description="A brief description of topics to cover.")
+
+def create_calendar_events(events: list[CalendarEventInput]) -> str:
+    """
+    Creates multiple calendar events in the user's primary Google Calendar in a single call.
+    Use this when you need to schedule multiple study slots, a whole study plan, or several deadlines at once.
+    
+    Args:
+        events: A list of study sessions to schedule.
+            
+    Returns:
+        A JSON string with the status of each event creation.
+    """
+    creds = load_calendar_credentials()
+    if not creds:
+        return json.dumps({
+            "error": "Google Calendar is not connected. The user must authenticate first via the sidebar in the UI."
+        })
+        
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        results = []
+        
+        for item in events:
+            summary = item.summary
+            start_time = item.start_time
+            end_time = item.end_time
+            description = item.description
+            
+            if not start_time or not end_time:
+                results.append({"summary": summary, "status": "failed", "error": "Missing start_time or end_time"})
+                continue
+                
+            event = {
+                'summary': summary,
+                'description': description,
+            }
+            
+            if '+' in start_time or '-' in start_time[10:]:
+                event['start'] = {'dateTime': start_time}
+                event['end'] = {'dateTime': end_time}
+            else:
+                event['start'] = {'dateTime': start_time, 'timeZone': 'UTC'}
+                event['end'] = {'dateTime': end_time, 'timeZone': 'UTC'}
+                
+            try:
+                created_event = service.events().insert(calendarId='primary', body=event).execute()
+                results.append({
+                    "summary": summary,
+                    "status": "success",
+                    "event_id": created_event.get("id")
+                })
+            except Exception as item_err:
+                results.append({
+                    "summary": summary,
+                    "status": "failed",
+                    "error": str(item_err)
+                })
+                
+        return json.dumps({"status": "completed", "results": results})
+    except Exception as e:
+        return json.dumps({
+            "error": f"Failed to batch create calendar events: {str(e)}"
         })
