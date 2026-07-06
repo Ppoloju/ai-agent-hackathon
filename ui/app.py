@@ -126,8 +126,8 @@ st.markdown("""
 /* Main container max-width for chat-like feel */
 .main .block-container {
     max-width: 900px;
-    padding-top: 1rem;
-    padding-bottom: 3rem;
+    padding-top: 0.5rem;
+    padding-bottom: 2rem;
 }
 
 /* Sidebar width - 1/3 of page */
@@ -171,9 +171,9 @@ st.markdown("""
 /* Sidebar button styling */
 [data-testid="stSidebar"] .stButton > button {
     width: 100%;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.15rem;
     font-weight: 500;
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 0.8rem;
 }
 
 /* Chat list item styling */
@@ -185,8 +185,8 @@ st.markdown("""
 /* Action buttons (delete, rename) */
 [data-testid="stSidebar"] .stButton[key*="del_"] > button,
 [data-testid="stSidebar"] .stButton[key*="rename_"] > button {
-    padding: 0.5rem 0.75rem;
-    font-size: 1.2rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 1.1rem;
     width: auto;
 }
 
@@ -195,16 +195,16 @@ st.markdown("""
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border: none;
     color: white;
-    padding: 0.4rem 0.8rem;
-    font-size: 0.9rem;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
 }
 
 /* Clear All button - matching UI */
 .stButton > button:has-text("Clear All") {
     background-color: #f87171;
     color: white;
-    padding: 0.4rem 0.8rem;
-    font-size: 0.9rem;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
 }
 .stButton > button:has-text("Clear All"):hover {
     background-color: #ef4444;
@@ -212,8 +212,8 @@ st.markdown("""
 
 /* Chat message action buttons */
 [data-testid="stChatMessage"] .stButton > button {
-    padding: 0.5rem 0.75rem;
-    font-size: 1.4rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 1.3rem;
     background: transparent;
     border: 1px solid #e5e7eb;
 }
@@ -422,7 +422,7 @@ with st.sidebar:
                     )
                     auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
                     
-                    st.markdown("""<style>.stLinkButton > a {background-color: #E85D5A !important;color: white !important;border: none !important;width: 100%;text-align: center;border-radius: 0.5rem;padding: 0.5rem 1rem;font-weight: 500;}.stLinkButton > a:hover {background-color: #d94f4c !important;color: white !important;}</style>""", unsafe_allow_html=True)
+                    st.markdown("""<style>.stLinkButton > a {background-color: #f87171 !important;color: white !important;border: none !important;width: 100%;text-align: center;border-radius: 0.5rem;padding: 0.4rem 0.8rem;font-weight: 500;font-size: 0.9rem;}.stLinkButton > a:hover {background-color: #ef4444 !important;color: white !important;}</style>""", unsafe_allow_html=True)
 
                     st.link_button("🔗 Connect Google Calendar", auth_url,use_container_width=True)
                     st.caption("You will be redirected back here after authorizing.")
