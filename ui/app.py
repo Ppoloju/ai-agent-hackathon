@@ -67,17 +67,24 @@ HISTORY_PATH = os.path.join(PROJECT_ROOT, "chat_history.json")
 FIREBASE_CREDS_PATH = os.path.join(PROJECT_ROOT, "firebase-credentials.json")
 
 # Initialize Firebase only once
-if not firebase_admin._apps:
-    if os.path.exists(FIREBASE_CREDS_PATH):
-        try:
-            cred = credentials.Certificate(FIREBASE_CREDS_PATH)
-            firebase_admin.initialize_app(cred)
-        except Exception as e:
-            print(f"Firebase init error: {e}")
+try:
+    if not firebase_admin._apps:
+        if os.path.exists(FIREBASE_CREDS_PATH):
+            try:
+                cred = credentials.Certificate(FIREBASE_CREDS_PATH)
+                firebase_admin.initialize_app(cred)
+                print("Firebase initialized successfully")
+            except Exception as e:
+                print(f"Firebase init error: {e}")
+except Exception as e:
+    print(f"Firebase initialization check error: {e}")
 
 def get_db():
-    if firebase_admin._apps:
-        return firestore.client()
+    try:
+        if firebase_admin._apps:
+            return firestore.client()
+    except Exception as e:
+        print(f"Firestore client error: {e}")
     return None
 
 def load_all_sessions():
@@ -139,17 +146,18 @@ def save_all_sessions(sessions):
     except Exception as e:
         print(f"Error saving chat history: {e}")
 
-st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="centered", initial_sidebar_state="expanded")
 
 # --- CUSTOM CSS FOR CHATGPT STYLE ---
 st.markdown("""
 <style>
-/* Ensure sidebar is always visible */
-.css-1d391kg {
+/* Force sidebar to be always visible */
+[data-testid="stSidebar"] {
     display: block !important;
+    width: 300px !important;
 }
-.css-1lcbmhc {
-    display: block !important;
+[data-testid="collapsedControl"] {
+    display: none !important;
 }
 
 /* Main container max-width for chat-like feel */
@@ -466,10 +474,10 @@ with chat_container:
                         st.session_state[f"play_{idx}"] = True
                 with col2:
                     escaped = msg['content'].replace('`', '\\`').replace('\\', '\\\\').replace('"', '&quot;').replace('\n', '\\n')
-                    components.html(
+                    st.html(
                         f'''
                         <button class="icon-btn" onclick="navigator.clipboard.writeText(`{escaped}`)">📋</button>
-                        ''', height=35
+                        '''
                     )
             
             st.markdown(msg["content"])
