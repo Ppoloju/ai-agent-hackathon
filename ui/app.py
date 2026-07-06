@@ -28,19 +28,15 @@ from agent.agents import study_buddy_agent
 def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
     """Transcribe audio bytes to text using the Gemini API."""
     try:
-        import google.generativeai as genai
+        from google import genai
         api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         if not api_key:
             return "__TRANSCRIPTION_ERROR__"
-        genai.configure(api_key=api_key)
-        # Use the correct model name for the current API version
-        # "gemini-1.5-flash-001" is the available flash model for generate_content
-        # Use a universally available model name. Adjust as needed for your API version.
-        # "gemini-pro" is guaranteed to exist for most accounts.
-        model = genai.GenerativeModel("gemini-pro")
-        audio_part = {"mime_type": mime_type, "data": audio_bytes}
-        response = model.generate_content(
-            ["Please transcribe the following audio. Return only the transcribed text, nothing else.", audio_part]
+        client = genai.Client(api_key=api_key)
+        # Use the correct model for transcription
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=["Please transcribe the following audio. Return only the transcribed text, nothing else.", genai.types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)]
         )
         text = response.text.strip() if response.text else ""
         return text if text else "__TRANSCRIPTION_ERROR__"
@@ -143,11 +139,19 @@ def save_all_sessions(sessions):
     except Exception as e:
         print(f"Error saving chat history: {e}")
 
-st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="centered", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="wide", initial_sidebar_state="expanded")
 
 # --- CUSTOM CSS FOR CHATGPT STYLE ---
 st.markdown("""
 <style>
+/* Ensure sidebar is always visible */
+.css-1d391kg {
+    display: block !important;
+}
+.css-1lcbmhc {
+    display: block !important;
+}
+
 /* Main container max-width for chat-like feel */
 .main .block-container {
     max-width: 800px;

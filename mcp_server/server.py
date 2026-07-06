@@ -1,8 +1,17 @@
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    FastMCP = None
+    print("Warning: mcp package not installed. MCP server will not run.")
+
 import json
 import os
 import logging
 import time
+import sys
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ---------------------------------------------------------
 # Configuration via environment variables (with sensible defaults)
@@ -13,7 +22,7 @@ RATE_LIMIT = int(os.getenv("MCP_RATE_LIMIT", "60"))  # max requests per minute
 # Transport used to actually serve the tools over the network.
 # FastMCP's run() defaults to "stdio" (which ignores host/port entirely),
 # so this must be set explicitly for host/port to take effect.
-TRANSPORT = os.getenv("MCP_TRANSPORT", "streamable-http")  # "streamable-http" | "sse" | "stdio"
+TRANSPORT = os.getenv("MCP_TRANSPORT", "stdio")  # "streamable-http" | "sse" | "stdio"
 
 # ---------------------------------------------------------
 # Logging setup
@@ -50,22 +59,24 @@ rate_limiter = RateLimiter(RATE_LIMIT)
 # ---------------------------------------------------------
 # Create the FastMCP server
 # ---------------------------------------------------------
-mcp = FastMCP(
-    name="StudyPlannerMCP",
-    host=HOST,
-    port=PORT,
-    instructions=(
-        "Study Planner MCP Server – exposes tools for calendar events, "
-        "syllabus data, task management, and weather lookups. "
-        "Use these tools to help students plan their study schedules."
-    ),
-    log_level="INFO",
-)
+if FastMCP:
+    mcp = FastMCP(
+        name="StudyPlannerMCP",
+        host=HOST,
+        port=PORT,
+        instructions=(
+            "Study Planner MCP Server – exposes tools for calendar events, "
+            "syllabus data, task management, and weather lookups. "
+            "Use these tools to help students plan their study schedules."
+        ),
+        log_level="INFO",
+    )
+else:
+    mcp = None
 
 # ---------------------------------------------------------
 # Tool definitions (exposed via MCP protocol)
 # ---------------------------------------------------------
-@mcp.tool(name="get_calendar_events", description="Retrieve Google Calendar events for a date range (mock data for Phase 2).")
 def get_calendar_events(start_date: str, end_date: str) -> str:
     """Return mock calendar events as JSON.
     Replace with real Google Calendar API calls for production.
@@ -84,7 +95,6 @@ def get_calendar_events(start_date: str, end_date: str) -> str:
     return json.dumps(events)
 
 
-@mcp.tool(name="get_syllabus_data", description="Retrieve syllabus topics, estimated study hours, and exam dates.")
 def get_syllabus_data() -> str:
     """Return mock syllabus data as JSON."""
     if not rate_limiter.allow():
@@ -96,7 +106,6 @@ def get_syllabus_data() -> str:
     return json.dumps(data)
 
 
-@mcp.tool(name="add_task", description="Create a new study task with a title and due date.")
 def add_task(title: str, due: str) -> str:
     """Add a study task (placeholder implementation).
 
@@ -110,7 +119,6 @@ def add_task(title: str, due: str) -> str:
     return json.dumps({"success": True, "title": title, "due": due})
 
 
-@mcp.tool(name="get_weather", description="Get weather forecast for a city (placeholder data).")
 def get_weather(city: str) -> str:
     """Return dummy weather data for the given city.
 
@@ -124,16 +132,26 @@ def get_weather(city: str) -> str:
     return json.dumps(weather)
 
 
-@mcp.tool(name="health_check", description="Returns server health status.")
 def health_check() -> str:
     """Check if the MCP server is running and healthy."""
     return json.dumps({"status": "ok", "server": "StudyPlannerMCP", "tools": 5})
+
+# Register tools with MCP server if available
+if mcp:
+    mcp.tool()(get_calendar_events)
+    mcp.tool()(get_syllabus_data)
+    mcp.tool()(add_task)
+    mcp.tool()(get_weather)
+    mcp.tool()(health_check)
 
 
 # ---------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------
 if __name__ == "__main__":
+    if not mcp:
+        log.error("MCP server cannot start: FastMCP not available")
+        sys.exit(1)
     if TRANSPORT == "stdio":
         log.info("Starting StudyPlannerMCP server over stdio (host/port unused)")
     else:

@@ -1,36 +1,112 @@
 # Environment variables (CRITICAL: keep this excluded!)
 .env
+.env.local
+.env.*.local
 
 # Firebase service-account credentials (NEVER commit this!)
 firebase-credentials.json
+firebase-credentials*.json
 
 # Virtual environments
 .venv/
 venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.manifest
+*.spec
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+coverage.xml
+*.cover
+*.log
+logs/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
 
 # Databases
 *.db
 *.sqlite3
-
-# OS generated files
-.DS_Store
-Thumbs.db
-desktop.ini
+*.sqlite
 
 # Google Calendar Credentials & OAuth Temp files
 token.json
 ui/.oauth_verifier.txt
 chat_history.json
 
-# Log files
-logs/
-agent_error.log
+# Session and temporary files
+*.session
+*.tmp
+*.temp
+.cache/
 
-# VS Code Settings
-.vscode/
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST

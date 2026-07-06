@@ -85,16 +85,16 @@ The `requirements.txt` installs the following packages:
 
 | Package | Purpose |
 |---|---|
-| `streamlit` | Web UI framework |
-| `python-dotenv` | Load `.env` files into environment variables |
-| `PyPDF2` | Extract text from uploaded PDF syllabi |
-| `google-genai` | Google Gemini API client (chat + function calling) |
-| `google-auth-oauthlib` | OAuth 2.0 flow for Google Calendar authentication |
-| `google-api-python-client` | Google Calendar REST API calls |
-| `mcp` | Model Context Protocol server support |
-| `gtts` | Google Text-to-Speech for voice responses |
-| `pydantic` | Data validation for batch calendar event creation |
-| `firebase-admin` | Connects to Firebase Firestore for cloud chat storage |
+| `streamlit>=1.28.0` | Web UI framework |
+| `python-dotenv>=1.0.0` | Load `.env` files into environment variables |
+| `PyPDF2>=3.0.0` | Extract text from uploaded PDF syllabi |
+| `google-genai>=0.3.0` | Google Gemini API client (chat + function calling) |
+| `google-auth-oauthlib>=1.0.0` | OAuth 2.0 flow for Google Calendar authentication |
+| `google-api-python-client>=2.100.0` | Google Calendar REST API calls |
+| `mcp>=0.9.0` | Model Context Protocol server support |
+| `gtts>=2.4.0` | Google Text-to-Speech for voice responses |
+| `pydantic>=2.0.0` | Data validation for batch calendar event creation |
+| `firebase-admin>=6.0.0` | Connects to Firebase Firestore for cloud chat storage |
 
 > **⚠️ Note:** Do NOT install `google-generativeai` — this project uses `google-genai` (the newer unified client). Installing the wrong package will cause an `ImportError`.
 
@@ -145,14 +145,30 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 
 #### 4c. Setup Firebase Firestore (Required for Chat History)
 
+Firebase Firestore is used to securely store your chat history in the cloud, enabling conversation persistence across devices and sessions.
+
 1. Go to the [Firebase Console](https://console.firebase.google.com/) and click **Add project**.
 2. Name your project (e.g., "StudyPlanner-AI") and click Continue.
 3. In the left sidebar, go to **Build → Firestore Database**.
-4. Click **Create database**. Select **Start in Test Mode** and choose a location.
+4. Click **Create database**. Select **Start in Test Mode** and choose a location near you for better performance.
 5. Click the **Gear Icon ⚙️ (Project settings)** in the top left corner.
 6. Go to the **Service accounts** tab and click **Generate new private key**.
 7. A `.json` file will download to your computer.
 8. **CRITICAL:** Move this file into the root of this cloned repository (`ai-agent-hackathon/`) and rename it exactly to `firebase-credentials.json`.
+9. **Security Note:** The `firebase-credentials.json` file contains sensitive credentials and is already included in `.gitignore` to prevent accidental commits. Never share this file or commit it to version control.
+
+**Firestore Security Rules (Optional but Recommended):**
+For production use, configure Firestore security rules in the Firebase Console to restrict access:
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
 
 ---
 
