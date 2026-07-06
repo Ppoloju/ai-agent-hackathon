@@ -146,30 +146,17 @@ def save_all_sessions(sessions):
     except Exception as e:
         print(f"Error saving chat history: {e}")
 
-st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="centered", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Study Planner", page_icon="LOGO.png", layout="wide", initial_sidebar_state="expanded")
 
 # --- CUSTOM CSS FOR CHATGPT STYLE ---
 st.markdown("""
 <style>
-/* Force sidebar to be always visible */
-[data-testid="stSidebar"] {
-    display: block !important;
-    width: 300px !important;
-}
-[data-testid="collapsedControl"] {
-    display: none !important;
-}
-
 /* Main container max-width for chat-like feel */
 .main .block-container {
     max-width: 800px;
     padding-top: 2rem;
     padding-bottom: 5rem;
 }
-/* Hide Streamlit header and footer */
-header {visibility: hidden;}
-footer {visibility: hidden;}
-
 /* User and Assistant avatars */
 [data-testid="stChatMessageAvatarUser"] {
     background-color: #5436DA !important;
