@@ -22,6 +22,27 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 from agent.agents import study_buddy_agent
 
+def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
+    """Transcribe audio bytes to text using the Gemini API."""
+    try:
+        import google.generativeai as genai
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            return "__TRANSCRIPTION_ERROR__"
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        audio_part = {"mime_type": mime_type, "data": audio_bytes}
+        response = model.generate_content(
+            ["Please transcribe the following audio. Return only the transcribed text, nothing else.", audio_part]
+        )
+        text = response.text.strip() if response.text else ""
+        return text if text else "__TRANSCRIPTION_ERROR__"
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        if "quota" in str(e).lower() or "rate" in str(e).lower():
+            return "__RATE_LIMIT__"
+        return "__TRANSCRIPTION_ERROR__"
+
 def clean_markdown_for_tts(text: str) -> str:
     # Remove markdown headers
     text = re.sub(r'#+\s+', '', text)
@@ -122,18 +143,20 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = load_history()
 if 'file_context' not in st.session_state:
     st.session_state.file_context = ""
-if 'processed_audio_hashes' not in st.session_state:
-    st.session_state.processed_audio_hashes = set()
-if 'audio_key' not in st.session_state:
-    st.session_state.audio_key = 0
-if 'pending_audio' not in st.session_state:
-    st.session_state.pending_audio = None
 
 # --- SIDEBAR: Upload Context & Google Calendar ---
 with st.sidebar:
-    st.image("LOGO.png", width=50)
+    col_img, col_title = st.columns([1, 3])
+    with col_img:
+        st.image("LOGO.png", width=55)
+    with col_title:
+        st.markdown(
+            "<h2 style='margin:0; padding-top:8px; line-height:1.2;'>AI Study Planner</h2>",
+            unsafe_allow_html=True
+        )
+    st.markdown("---")
     st.header("Upload Context")
-    uploaded_files = st.file_uploader("Upload Syllabi (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Syllabus (PDF/TXT)", type=["pdf", "txt"], accept_multiple_files=True)
 
     
     if uploaded_files:
@@ -267,83 +290,148 @@ with chat_container:
             if msg.get("audio_bytes"):
                 st.audio(msg["audio_bytes"], format="audio/mp3")
 
-# --- AUDIO & TEXT INPUT PROCESSING ---
-audio_value = st.audio_input("Or speak to your Study Buddy:", key=f"audio_recorder_{st.session_state.audio_key}")
 
-if audio_value is not None:
-    # Read the audio bytes and reset file pointer
-    audio_bytes = audio_value.read()
-    audio_value.seek(0)
-    
-    # Check if this audio has already been processed using a hash
-    audio_hash = hashlib.md5(audio_bytes).hexdigest()
-    if audio_hash not in st.session_state.processed_audio_hashes:
-        st.session_state.processed_audio_hashes.add(audio_hash)
-        
-        # Save audio to pending state for deferred processing
-        st.session_state.pending_audio = {
-            "bytes": audio_bytes,
-            "type": audio_value.type if hasattr(audio_value, 'type') else "audio/wav"
-        }
-        
-        # Increment the key to reset the recorder widget instantly
-        st.session_state.audio_key += 1
-        st.rerun()
+# --- FLOATING MIC BUTTON (Web Speech API) ---
+st.markdown("""
+<style>
+#voice-mic-wrap {
+    position: fixed;
+    bottom: 20px;
+    right: 74px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+#voice-mic-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(102,126,234,0.45);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    outline: none;
+    padding: 0;
+}
+#voice-mic-btn:hover {
+    transform: scale(1.12);
+    box-shadow: 0 6px 22px rgba(102,126,234,0.65);
+}
+#voice-mic-btn.vmic-listening {
+    background: linear-gradient(135deg, #f5575c 0%, #c0392b 100%);
+    box-shadow: 0 0 0 0 rgba(245,87,92,0.7);
+    animation: vmic-pulse 1.2s ease-out infinite;
+}
+@keyframes vmic-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(245,87,92,0.7); }
+    70%  { box-shadow: 0 0 0 13px rgba(245,87,92,0); }
+    100% { box-shadow: 0 0 0 0 rgba(245,87,92,0); }
+}
+#voice-mic-toast {
+    background: rgba(30,30,40,0.92);
+    color: #fff;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    max-width: 180px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px);
+}
+#voice-mic-toast.vmic-show { display: block; }
+</style>
 
-# --- PENDING AUDIO PROCESSING (DEFERRED RUN) ---
-if st.session_state.pending_audio is not None:
-    pending = st.session_state.pending_audio
-    st.session_state.pending_audio = None  # Clear immediately to prevent repeat runs
-    
-    # Transcribe audio using the agent
-    with chat_container:
-        with st.chat_message("user"):
-            with st.spinner("Transcribing your voice message..."):
-                transcript = study_buddy_agent.transcribe_audio(pending["bytes"], pending["type"])
-    
-    if transcript == "__RATE_LIMIT__":
-        st.warning("⚠️ Transcription hit a rate limit. Please wait ~30 seconds and try again.")
-    elif transcript == "__TRANSCRIPTION_ERROR__":
-        st.warning("⚠️ Could not transcribe the audio. Please try speaking clearly and try again.")
-    elif transcript.strip():
-        # Append transcribed prompt to history
-        st.session_state.chat_history.append({"role": "user", "content": transcript})
-        
-        # Construct context-aware prompt
-        context_block = f"Uploaded Syllabus Content:\n{st.session_state.file_context}\n\n" if st.session_state.file_context else "No syllabus uploaded yet.\n\n"
-        full_prompt = context_block + f"User Request: {transcript}"
-        
-        # Fetch AI Response
-        with chat_container:
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = study_buddy_agent.run(full_prompt)
-                    st.markdown(response)
-                    
-                    # Generate TTS if enabled
-                    tts_bytes = None
-                    if tts_enabled:
-                        try:
-                            from gtts import gTTS
-                            import io
-                            clean_text = clean_markdown_for_tts(response)
-                            if clean_text:
-                                tts = gTTS(text=clean_text, lang='en')
-                                fp = io.BytesIO()
-                                tts.write_to_fp(fp)
-                                fp.seek(0)
-                                tts_bytes = fp.read()
-                                st.audio(tts_bytes, format="audio/mp3")
-                        except Exception as e:
-                            st.error(f"Error generating text-to-speech: {e}")
-        
-        # Save AI response with audio
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": response,
-            "audio_bytes": tts_bytes
-        })
-        st.rerun()
+<div id="voice-mic-wrap">
+  <button id="voice-mic-btn" title="Click to speak" onclick="vmicToggle()">🎤</button>
+  <div id="voice-mic-toast"></div>
+</div>
+
+<script>
+(function(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, active = false;
+
+  function toast(msg, keep) {
+    const el = document.getElementById('voice-mic-toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('vmic-show');
+    if (!keep) setTimeout(() => el.classList.remove('vmic-show'), 3000);
+  }
+
+  function injectText(text) {
+    const selectors = [
+      '[data-testid="stChatInputTextArea"]',
+      '[data-testid="stChatInput"] textarea',
+      'textarea[aria-label]'
+    ];
+    let input = null;
+    for (const s of selectors) { input = document.querySelector(s); if (input) break; }
+    if (!input) { toast('❌ Could not find chat input'); return; }
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  }
+
+  window.vmicToggle = function() {
+    if (!SR) { alert('Speech recognition not supported. Use Chrome or Edge.'); return; }
+    if (active && rec) { rec.stop(); return; }
+
+    rec = new SR();
+    rec.lang = 'en-US';
+    rec.continuous = false;
+    rec.interimResults = true;
+
+    const btn = document.getElementById('voice-mic-btn');
+
+    rec.onstart = () => {
+      active = true;
+      btn.classList.add('vmic-listening');
+      btn.innerHTML = '&#9209;';
+      toast('🔴 Listening...', true);
+    };
+
+    rec.onresult = (e) => {
+      let interim = '', final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        (e.results[i].isFinal ? (s => final += s) : (s => interim += s))(e.results[i][0].transcript);
+      }
+      const txt = final || interim;
+      if (txt) {
+        toast(txt.length > 35 ? txt.slice(0, 35) + '…' : txt, !final);
+        injectText(txt);
+      }
+    };
+
+    rec.onerror = (e) => {
+      active = false; btn.classList.remove('vmic-listening'); btn.innerHTML = '🎤';
+      toast('❌ ' + e.error);
+    };
+
+    rec.onend = () => {
+      active = false; btn.classList.remove('vmic-listening'); btn.innerHTML = '🎤';
+      setTimeout(() => document.getElementById('voice-mic-toast').classList.remove('vmic-show'), 2500);
+    };
+
+    rec.start();
+  };
+})();
+</script>
+""", unsafe_allow_html=True)
 
 
 if prompt := st.chat_input("Ask me to create a plan, analyze the syllabus, or generate questions..."):
