@@ -39,6 +39,6 @@ study_buddy_agent = Agent(
         "an error saying calendar is not connected), kindly instruct them to follow the steps in the sidebar "
         "to connect their Google Calendar first."
     ),
-    model="gemini-2.5-flash"
+    model="gemini-2.5-flash",
     tools=[get_calendar_events, create_calendar_event, create_calendar_events, delete_calendar_event, update_calendar_event]
 )
