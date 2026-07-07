@@ -14,7 +14,7 @@ from firebase_admin import credentials, firestore
 import streamlit.components.v1 as components
 
 BASE_DIR = Path(__file__).resolve().parent
-ENV_PATH = BASE_DIR / ".env"
+ENV_PATH = BASE_DIR.parent / ".env"
 
 # Load .env explicitly
 load_dotenv(dotenv_path=ENV_PATH, override=True)
@@ -34,7 +34,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/wav") -> str:
         client = genai.Client(api_key=api_key)
         # Use the correct model for transcription
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
             contents=["Please transcribe the following audio. Return only the transcribed text, nothing else.", genai.types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)]
         )
         text = response.text.strip() if response.text else ""
@@ -106,7 +106,11 @@ def save_all_sessions(sessions):
     for sid, sdata in sessions.items():
         msgs_for_db = []
         for msg in sdata.get("messages", []):
-            msgs_for_db.append(msg.copy()) # Keep bytes for Firestore if any
+            msg_copy = {
+                "role": msg.get("role"),
+                "content": msg.get("content")
+            }
+            msgs_for_db.append(msg_copy)
             
         sessions_for_db[sid] = {"title": sdata.get("title", "Chat"), "messages": msgs_for_db}
             
@@ -541,8 +545,21 @@ with chat_container:
             
             st.markdown(msg["content"])
             
-            if st.session_state.get(f"play_{idx}") and msg.get("audio_bytes"):
-                st.audio(msg["audio_bytes"], format="audio/mp3", autoplay=True)
+            if st.session_state.get(f"play_{idx}"):
+                with st.spinner("Generating voice..."):
+                    try:
+                        from gtts import gTTS
+                        import io
+                        clean_text = clean_markdown_for_tts(msg["content"])
+                        if clean_text:
+                            tts = gTTS(text=clean_text, lang='en')
+                            fp = io.BytesIO()
+                            tts.write_to_fp(fp)
+                            fp.seek(0)
+                            audio_bytes = fp.read()
+                            st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+                    except Exception as e:
+                        st.error(f"Error generating voice: {e}")
                 st.session_state[f"play_{idx}"] = False # Reset after playing
 
 
@@ -631,7 +648,6 @@ if final_prompt:
     # Save AI response to history and rerun
     append_to_current_session({
         "role": "assistant", 
-        "content": response,
-        "audio_bytes": tts_bytes
+        "content": response
     })
     st.rerun()

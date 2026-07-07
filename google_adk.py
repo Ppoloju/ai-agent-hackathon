@@ -8,13 +8,14 @@ except ImportError:
     genai = None
 
 class Agent:
-    def __init__(self, name: str, instructions: str, model: str, tools: list = None):
+    def __init__(self, name: str, instructions: str, model: str = None, tools: list = None):
         self.name = name
         self.instructions = instructions
         self.model = model
         self.tools = tools or []
         
         api_key = os.environ.get("GEMINI_API_KEY")
+        self.api_key = api_key
         print(f"[AGENT INIT] genai imported: {genai is not None}")
         print(f"[AGENT INIT] API key present: {api_key is not None}")
         if api_key:
@@ -38,6 +39,16 @@ class Agent:
         return 30.0
 
     def run(self, prompt: str) -> str:
+        # Check if the API key has changed dynamically (e.g. from Streamlit reload)
+        current_api_key = os.environ.get("GEMINI_API_KEY")
+        if current_api_key != self.api_key:
+            self.api_key = current_api_key
+            print(f"[AGENT UPDATE] API key changed to: {current_api_key[:10] if current_api_key else 'None'}...")
+            if genai and current_api_key and current_api_key != "your_gemini_api_key_here":
+                self.client = genai.Client(api_key=current_api_key)
+            else:
+                self.client = None
+
         if not self.client:
             print("Running in MOCK mode (no API key or google-genai library).")
             if "Parse this syllabus" in prompt:
@@ -50,7 +61,7 @@ class Agent:
         while retry_count < max_retries:
             try:
                 # Use the specified model
-                model_to_use = self.model if self.model else "gemini-3.5-flash"
+                model_to_use = self.model if self.model else os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
                 
                 # Prepare configuration
                 config_args = {
